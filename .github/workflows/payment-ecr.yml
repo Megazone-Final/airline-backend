@@ -1,0 +1,40 @@
+name: Auth Service - Build & Push to ECR
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - "payments/**"
+
+permissions:
+    id-token: write
+    contents: read
+
+jobs:
+    build-and-push:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Configure AWS credentials
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                  role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+                  role-session-name: github-actions-auth
+                  aws-region: ap-northeast-2
+
+            - name: Login to Amazon ECR
+              id: ecr-login
+              uses: aws-actions/amazon-ecr-login@v2
+
+            - name: Build & Push Docker image
+              env:
+                  REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+                  REPOSITORY: airline-backend/payments
+                  IMAGE_TAG: ${{ github.sha }}
+              run: |
+                  docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest ./auth
+                  docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+                  docker push $REGISTRY/$REPOSITORY:latest
