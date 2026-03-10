@@ -1,4 +1,4 @@
-name: Auth Service - Build & Push to ECR
+name: Flight Service - Build & Push to ECR
 
 on:
     push:
