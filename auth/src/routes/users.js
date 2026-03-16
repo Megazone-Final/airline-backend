@@ -1,30 +1,82 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
 const auth = require('../middleware/auth');
+const {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  comparePassword,
+} = require('../repositories/users');
+const {
+  createSession,
+  destroySession,
+  SESSION_COOKIE_NAME,
+  SESSION_TTL_SECONDS,
+} = require('../services/sessions');
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+
+function getSessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
+    sameSite: process.env.COOKIE_SAME_SITE || 'lax',
+    maxAge: SESSION_TTL_SECONDS * 1000,
+    path: '/',
+  };
+}
+
+function getSessionCookieClearOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
+    sameSite: process.env.COOKIE_SAME_SITE || 'lax',
+    path: '/',
+  };
+}
+
+function validateRegistration(body) {
+  const { name, email, password, phone } = body;
+
+  if (!name || !String(name).trim()) {
+    return '이름을 입력하세요';
+  }
+
+  if (!email || !String(email).trim()) {
+    return '이메일을 입력하세요';
+  }
+
+  if (!password) {
+    return '비밀번호를 입력하세요';
+  }
+
+  if (String(password).length < 8) {
+    return '비밀번호는 8자 이상이어야 합니다';
+  }
+
+  if (!phone || !String(phone).trim()) {
+    return '전화번호를 입력하세요';
+  }
+
+  return null;
+}
 
 // POST /users/register
 router.post('/register', async (req, res) => {
   try {
     const { name, email, password, phone } = req.body;
+    const validationMessage = validateRegistration(req.body);
 
-    // Check duplicate email
-    const exists = await User.findOne({ email });
-    if (exists) {
-      return res.status(409).json({ message: '이미 사용 중인 이메일입니다' });
+    if (validationMessage) {
+      return res.status(400).json({ message: validationMessage });
     }
 
-    const user = await User.create({ name, email, password, phone });
-    res.status(201).json({ message: '회원가입이 완료되었습니다', userId: user._id });
+    const user = await createUser({ name, email, password, phone });
+    res.status(201).json(user);
   } catch (err) {
-    if (err.name === 'ValidationError') {
-      const messages = Object.values(err.errors).map((e) => e.message);
-      return res.status(400).json({ message: messages[0] });
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
     }
+
     res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
 });
@@ -38,23 +90,40 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: '이메일과 비밀번호를 입력하세요' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await findUserByEmail(email);
     if (!user) {
       return res.status(401).json({ message: '이메일 또는 비밀번호가 올바르지 않습니다' });
     }
 
-    const isMatch = await user.comparePassword(password);
+    const isMatch = await comparePassword(password, user.passwordHash);
     if (!isMatch) {
       return res.status(401).json({ message: '이메일 또는 비밀번호가 올바르지 않습니다' });
     }
 
-    const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
-    );
+    const { token } = await createSession(user);
+    res.cookie(SESSION_COOKIE_NAME, token, getSessionCookieOptions());
 
-    res.json({ token });
+    res.json({
+      token,
+      sessionToken: token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: '서버 오류가 발생했습니다' });
+  }
+});
+
+// POST /users/logout
+router.post('/logout', auth, async (req, res) => {
+  try {
+    await destroySession(req.session.token);
+    res.clearCookie(SESSION_COOKIE_NAME, getSessionCookieClearOptions());
+    res.json({ message: '로그아웃되었습니다' });
   } catch (err) {
     res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
@@ -63,11 +132,11 @@ router.post('/login', async (req, res) => {
 // GET /users/profile
 router.get('/profile', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await findUserById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다' });
     }
-    res.json({ user });
+    res.json(user);
   } catch (err) {
     res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }

@@ -2,18 +2,17 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const userRoutes = require('./routes/users');
+const paymentsRoutes = require('./routes/payments');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
 const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3003;
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-// Middleware
 app.use(
   cors({
     origin: corsOrigins.length > 0 ? corsOrigins : true,
@@ -23,10 +22,8 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
-// Routes
-app.use('/users', userRoutes);
+app.use('/payments', paymentsRoutes);
 
-// Health check
 app.get('/health', async (req, res) => {
   const checks = await Promise.allSettled([checkMySQL(), checkValkey()]);
   const mysqlOk = checks[0].status === 'fulfilled';
@@ -35,7 +32,7 @@ app.get('/health', async (req, res) => {
 
   res.status(status === 'ok' ? 200 : 503).json({
     status,
-    service: 'auth',
+    service: 'payments',
     dependencies: {
       mysql: mysqlOk ? 'ok' : 'error',
       valkey: valkeyOk ? 'ok' : 'error',
@@ -51,7 +48,7 @@ async function start() {
   console.log('Valkey connected');
 
   app.listen(PORT, () => {
-    console.log(`Auth service running on port ${PORT}`);
+    console.log(`Payment service running on port ${PORT}`);
   });
 }
 
