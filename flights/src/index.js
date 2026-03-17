@@ -6,7 +6,6 @@ const cookieParser = require('cookie-parser');
 const flightsRoutes = require('./routes/flights');
 const { router: reservationsRoutes, internalRouter } = require('./routes/reservations');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
-const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -29,17 +28,16 @@ app.use('/reservations', reservationsRoutes);
 app.use('/internal', internalRouter);
 
 app.get('/health', async (req, res) => {
-  const checks = await Promise.allSettled([checkMySQL(), checkValkey()]);
-  const mysqlOk = checks[0].status === 'fulfilled';
-  const valkeyOk = checks[1].status === 'fulfilled';
-  const status = mysqlOk && valkeyOk ? 'ok' : 'degraded';
+  const mysqlOk = await checkMySQL()
+    .then(() => true)
+    .catch(() => false);
+  const status = mysqlOk ? 'ok' : 'degraded';
 
   res.status(status === 'ok' ? 200 : 503).json({
     status,
     service: 'flights',
     dependencies: {
       mysql: mysqlOk ? 'ok' : 'error',
-      valkey: valkeyOk ? 'ok' : 'error',
     },
   });
 });
@@ -48,9 +46,6 @@ async function start() {
   await initMySQL();
   console.log('MySQL connected');
 
-  await initValkey();
-  console.log('Valkey connected');
-
   app.listen(PORT, () => {
     console.log(`Flight service running on port ${PORT}`);
   });
@@ -58,7 +53,7 @@ async function start() {
 
 async function shutdown(signal) {
   console.log(`${signal} received, shutting down`);
-  await Promise.allSettled([closeMySQL(), closeValkey()]);
+  await closeMySQL();
   process.exit(0);
 }
 

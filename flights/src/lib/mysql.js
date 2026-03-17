@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const mysql = require('mysql2/promise');
+const { Signer } = require('@aws-sdk/rds-signer');
 const seedFlights = require('../data/seedFlights');
 
 function parseBoolean(value) {
@@ -20,7 +21,7 @@ function parseBoolean(value) {
 }
 
 function buildSslOptions() {
-  const host = process.env.DB_HOST || 'localhost';
+  const host = process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com';
   const sslFlag = parseBoolean(process.env.DB_SSL);
   const sslMode = String(process.env.DB_SSL_MODE || '').trim().toLowerCase();
 
@@ -55,17 +56,67 @@ function buildSslOptions() {
   return ssl;
 }
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'airline_flights',
-  ssl: buildSslOptions(),
-  waitForConnections: true,
-  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
-  queueLimit: 0,
-});
+async function getIamAuthToken() {
+  const signer = new Signer({
+    hostname: process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com',
+    port: Number(process.env.DB_PORT || 3306),
+    username: process.env.DB_USER || 'flight_user',
+    region: process.env.AWS_REGION || 'ap-northeast-2',
+  });
+  return signer.getAuthToken();
+}
+
+let activePool;
+let currentPassword = process.env.DB_PASSWORD || '';
+
+function createPool(password) {
+  currentPassword = password;
+  activePool = mysql.createPool({
+    host: process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com',
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || 'flight_user',
+    password,
+    database: process.env.DB_NAME || 'flights',
+    ssl: buildSslOptions(),
+    waitForConnections: true,
+    connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
+    queueLimit: 0,
+    authPlugins: parseBoolean(process.env.DB_IAM_AUTH)
+      ? {
+          mysql_clear_password: () => () => Buffer.from(`${currentPassword}\0`),
+        }
+      : undefined,
+  });
+
+  return activePool;
+}
+
+function getActivePool() {
+  if (!activePool) {
+    createPool(process.env.DB_PASSWORD || '');
+  }
+
+  return activePool;
+}
+
+const pool = {
+  query(...args) {
+    return getActivePool().query(...args);
+  },
+  execute(...args) {
+    return getActivePool().execute(...args);
+  },
+  getConnection(...args) {
+    return getActivePool().getConnection(...args);
+  },
+  end(...args) {
+    if (!activePool) {
+      return Promise.resolve();
+    }
+
+    return activePool.end(...args);
+  },
+};
 
 async function createTables() {
   await pool.query(`
@@ -172,6 +223,25 @@ async function seedFlightData() {
 }
 
 async function initMySQL() {
+  if (parseBoolean(process.env.DB_IAM_AUTH)) {
+    const token = await getIamAuthToken();
+    createPool(token);
+
+    // Refresh token every 10 minutes (tokens expire in 15 mins)
+    setInterval(async () => {
+      try {
+        const newToken = await getIamAuthToken();
+        const currentPool = getActivePool();
+        currentPassword = newToken;
+        currentPool.pool.config.connectionConfig.password = newToken;
+      } catch (err) {
+        console.error('Failed to refresh RDS IAM token:', err);
+      }
+    }, 10 * 60 * 1000).unref(); // unref to allow process exit
+  } else {
+    createPool(process.env.DB_PASSWORD || '');
+  }
+
   await pool.query('SELECT 1');
 
   if (process.env.DB_AUTO_INIT === 'false') {
