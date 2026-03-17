@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-payments-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-app
+  template:
+    metadata:
+      labels:
+        app: payments-app
+    spec:
+      serviceAccountName: test-sa 
+      containers:
+      - name: payments-api
+        image: 036333380579.dkr.ecr.ap-northeast-2.amazonaws.com/airline-payments:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_HOST
+          value: "rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com"
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_USER
+          value: "payment_user"
+        - name: USE_IAM_AUTH  # <--- 이 부분이 describe 결과에 없었습니다!
+          value: "true"
+        - name: DB_NAME
+          value: "payments"
+        - name: DB_PASSWORD
+          value: "test1234"
+        - name: AWS_REGION
+          value: "ap-northeast-2"
+        - name: PORT
+          value: "8080"
+        - name: VALKEY_URL
+          value: "rediss://valkey-user:testtest12341234@master.valkey-an2-airline-svc.kkbvm5.apn2.cache.amazonaws.com:6379"
+        # - name: FLIGHTS_SERVICE_URL  # 임시 주석 처리
+        #   value: "http://localhost:3002"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-payments
+spec:
+  selector:
+    app: payments-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
