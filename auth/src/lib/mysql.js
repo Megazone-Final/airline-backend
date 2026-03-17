@@ -1,15 +1,84 @@
+const mysqlCore = require('mysql2');
 const mysql = require('mysql2/promise');
+const { Signer } = require('@aws-sdk/rds-signer');
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'airline_auth',
-  waitForConnections: true,
-  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
-  queueLimit: 0,
-});
+const host =
+  process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com';
+const port = Number(process.env.DB_PORT || 3306);
+const user = process.env.DB_USER || 'auth_user';
+const database = process.env.DB_NAME || 'auth';
+const connectionLimit = Number(process.env.DB_CONNECTION_LIMIT || 10);
+const useIamAuth =
+  process.env.DB_USE_IAM_AUTH === 'true' || process.env.DB_AUTH_MODE === 'iam';
+const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-northeast-2';
+
+const signer = useIamAuth
+  ? new Signer({
+      hostname: host,
+      port,
+      username: user,
+      region,
+    })
+  : null;
+
+const standardPool = useIamAuth
+  ? null
+  : mysql.createPool({
+      host,
+      port,
+      user,
+      password: process.env.DB_PASSWORD || '',
+      database,
+      waitForConnections: true,
+      connectionLimit,
+      queueLimit: 0,
+    });
+
+async function getIamConnection() {
+  const token = await signer.getAuthToken();
+
+  return mysql.createConnection({
+    host,
+    port,
+    user,
+    password: token,
+    database,
+    ssl: 'Amazon RDS',
+    authPlugins: {
+      mysql_clear_password: mysqlCore.authPlugins.mysql_clear_password({
+        password: token,
+      }),
+    },
+  });
+}
+
+async function withConnection(handler) {
+  if (!useIamAuth) {
+    return handler(standardPool);
+  }
+
+  const connection = await getIamConnection();
+
+  try {
+    return await handler(connection);
+  } finally {
+    await connection.end();
+  }
+}
+
+const pool = {
+  query(sql, params) {
+    return withConnection((connection) => connection.query(sql, params));
+  },
+  execute(sql, params) {
+    return withConnection((connection) => connection.execute(sql, params));
+  },
+  async end() {
+    if (standardPool) {
+      await standardPool.end();
+    }
+  },
+};
 
 async function initMySQL() {
   await pool.query('SELECT 1');

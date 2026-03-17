@@ -5,7 +5,7 @@ on:
         branches:
             - main
         paths:
-            - "flight/**"
+            - "flights/**"
 
 permissions:
     id-token: write
@@ -22,7 +22,7 @@ jobs:
               uses: aws-actions/configure-aws-credentials@v4
               with:
                   role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-                  role-session-name: github-actions-auth
+                  role-session-name: github-actions-flights
                   aws-region: ap-northeast-2
 
             - name: Login to Amazon ECR
@@ -35,6 +35,6 @@ jobs:
                   REPOSITORY: airline-backend/flights
                   IMAGE_TAG: ${{ github.sha }}
               run: |
-                  docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest ./auth
+                  docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest ./flights
                   docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
                   docker push $REGISTRY/$REPOSITORY:latest
