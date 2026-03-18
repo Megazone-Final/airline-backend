@@ -43,12 +43,12 @@ async function getIamConnection() {
     user,
     password: token,
     database,
-    ssl: 'Amazon RDS',
-    authPlugins: {
-      mysql_clear_password: mysqlCore.authPlugins.mysql_clear_password({
-        password: token,
-      }),
+    ssl: {
+      rejectUnauthorized: false
     },
+    authPlugins: {
+      mysql_clear_password: () => token
+    }
   });
 }
 
