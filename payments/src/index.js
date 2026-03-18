@@ -7,7 +7,7 @@ const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
 const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
 
 const app = express();
-const PORT = process.env.PORT || 3003;
+const PORT = process.env.PORT || 3000;
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
