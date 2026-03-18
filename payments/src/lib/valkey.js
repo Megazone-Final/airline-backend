@@ -1,9 +1,14 @@
 const Redis = require('ioredis');
 
-// 1. 엔드포인트 정보 (보내주신 '기본 엔드포인트' 주소)
-// 실제 환경변수(VALKEY_URL)에 아래 주소를 넣으시면 됩니다.
-// rediss://:[비밀번호]@master.valkey-an2-airline-svc.kkbvm5.apn2.cache.amazonaws.com:6379
-const valkeyUrl = process.env.VALKEY_URL;
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return value;
+}
+
+const valkeyUrl = requiredEnv('VALKEY_URL');
 
 const redisOptions = {
   lazyConnect: true,
@@ -17,16 +22,7 @@ const redisOptions = {
   tls: (valkeyUrl && valkeyUrl.startsWith('rediss')) ? { checkServerIdentity: () => undefined } : undefined,
 };
 
-const valkey = valkeyUrl
-  ? new Redis(valkeyUrl, redisOptions)
-  : new Redis({
-    host: process.env.VALKEY_HOST || 'master.valkey-an2-airline-svc.kkbvm5.apn2.cache.amazonaws.com',
-    port: Number(process.env.VALKEY_PORT || 6379),
-    // 보내주신 정보에 '사용자 그룹'이 있으므로 비밀번호가 필수입니다.
-    password: process.env.VALKEY_PASSWORD,
-    db: Number(process.env.VALKEY_DB || 0),
-    ...redisOptions
-  });
+const valkey = new Redis(valkeyUrl, redisOptions);
 
 // 에러 이벤트 핸들러 추가 (로그 도배 방지)
 valkey.on('error', (err) => {

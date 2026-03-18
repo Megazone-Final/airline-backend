@@ -1,11 +1,19 @@
 const mysql = require('mysql2/promise');
 const { Signer } = require('@aws-sdk/rds-signer');
 
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return value;
+}
+
 const rdsConfig = {
-  region: 'ap-northeast-2',
-  hostname: process.env.DB_HOST || 'proxy-1773710218895-rds-airline-mysql-main.proxy-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com',
+  region: requiredEnv('AWS_REGION'),
+  hostname: requiredEnv('DB_HOST'),
   port: Number(process.env.DB_PORT || 3306),
-  username: process.env.DB_USER || 'payment_user'
+  username: requiredEnv('DB_USER'),
 };
 
 const signer = new Signer(rdsConfig);
@@ -20,9 +28,12 @@ async function getConnection() {
     host: rdsConfig.hostname,
     user: rdsConfig.username,
     password: token,
-    database: process.env.DB_NAME || 'payments',
+    database: requiredEnv('DB_NAME'),
     port: rdsConfig.port,
-    ssl: 'Amazon RDS'
+    ssl: 'Amazon RDS',
+    authPlugins: {
+      mysql_clear_password: () => () => Buffer.from(`${token}\0`),
+    },
   });
 }
 
@@ -31,12 +42,10 @@ async function getConnection() {
  */
 async function initMySQL() {
   try {
-    // 공통 함수를 호출하여 연결을 가져옵니다.
     const connection = await getConnection();
 
-    console.log(`✅ RDS Proxy 연결 및 IAM 인증 성공 (User: ${rdsConfig.username})`);
+    console.log(`✅ RDS IAM 인증 성공 (${rdsConfig.hostname}, user: ${rdsConfig.username})`);
 
-    // 테이블 생성 쿼리 수행
     await connection.query(`
       CREATE TABLE IF NOT EXISTS payments (
         id VARCHAR(32) NOT NULL PRIMARY KEY,
@@ -80,8 +89,13 @@ async function checkMySQL() {
   await conn.end();
 }
 
+async function closeMySQL() {
+  return Promise.resolve();
+}
+
 module.exports = {
   initMySQL,
   checkMySQL,
-  pool: { query: executeQuery }
+  closeMySQL,
+  pool: { query: executeQuery },
 };
