@@ -14,25 +14,25 @@ const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-n
 
 const signer = useIamAuth
   ? new Signer({
-    hostname: host,
-    port,
-    username: user,
-    region,
-  })
+      hostname: host,
+      port,
+      username: user,
+      region,
+    })
   : null;
 
 const standardPool = useIamAuth
   ? null
   : mysql.createPool({
-    host,
-    port,
-    user,
-    password: process.env.DB_PASSWORD || '',
-    database,
-    waitForConnections: true,
-    connectionLimit,
-    queueLimit: 0,
-  });
+      host,
+      port,
+      user,
+      password: process.env.DB_PASSWORD || '',
+      database,
+      waitForConnections: true,
+      connectionLimit,
+      queueLimit: 0,
+    });
 
 async function getIamConnection() {
   const token = await signer.getAuthToken();
