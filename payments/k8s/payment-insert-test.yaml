@@ -78,14 +78,21 @@ data:
 
         const now = Date.now();
         const id = req.body.id || `PAY-TEST-${now}`;
-        const userId = Number(req.body.userId || 999999);
-        const reservationId = req.body.reservationId || `TEST-RES-${now}`;
-        const flightId = Number(req.body.flightId || 1);
-        const amount = Number(req.body.amount || req.body.totalAmount || 10000);
+        const userId = Number(req.body.user_id ?? req.body.userId ?? 999999);
+        const reservationId =
+          req.body.reservation_id ?? req.body.reservationId ?? `TEST-RES-${now}`;
+        const flightId = Number(req.body.flight_id ?? req.body.flightId ?? 1);
+        const amount = Number(req.body.amount ?? req.body.totalAmount ?? 10000);
         const method = req.body.method || 'CARD';
         const status = req.body.status || 'completed';
-        const travelDate = req.body.date || req.body.travelDate || new Date().toISOString().split('T')[0];
-        const passengerCount = Number(req.body.passengerCount || 1);
+        const travelDate =
+          req.body.travel_date ??
+          req.body.travelDate ??
+          req.body.date ??
+          new Date().toISOString().split('T')[0];
+        const passengerCount = Number(
+          req.body.passenger_count ?? req.body.passengerCount ?? 1
+        );
 
         await conn.execute(
           `
@@ -182,7 +189,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: airline-payment
+  name: svc-payment
   namespace: airline-payment
 spec:
   selector:

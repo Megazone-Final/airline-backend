@@ -22,7 +22,7 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
-app.use('/payments', paymentsRoutes);
+app.use('/api/payment', paymentsRoutes);
 
 app.get('/health', async (req, res) => {
   const checks = await Promise.allSettled([checkMySQL(), checkValkey()]);
