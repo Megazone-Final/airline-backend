@@ -1,40 +1,65 @@
-// const Redis = require('ioredis');
+const Redis = require('ioredis');
 
-// const valkey = process.env.VALKEY_URL
-//   ? new Redis(process.env.VALKEY_URL, {
-//       lazyConnect: true,
-//       maxRetriesPerRequest: 1,
-//     })
-//   : new Redis({
-//       host: process.env.VALKEY_HOST || 'localhost',
-//       port: Number(process.env.VALKEY_PORT || 6379),
-//       password: process.env.VALKEY_PASSWORD || undefined,
-//       db: Number(process.env.VALKEY_DB || 0),
-//       lazyConnect: true,
-//       maxRetriesPerRequest: 1,
-//     });
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return value;
+}
 
-// async function initValkey() {
-//   if (valkey.status === 'wait') {
-//     await valkey.connect();
-//   }
+const valkeyUrl = requiredEnv('VALKEY_URL');
 
-//   await valkey.ping();
-// }
+const redisOptions = {
+  lazyConnect: true,
+  maxRetriesPerRequest: 3,
+  retryStrategy(times) {
+    if (times > 3) return null;
+    return Math.min(times * 200, 2000);
+  },
+  tls: valkeyUrl.startsWith('rediss') ? { checkServerIdentity: () => undefined } : undefined,
+};
 
-// async function checkValkey() {
-//   await valkey.ping();
-// }
+const valkey = new Redis(valkeyUrl, redisOptions);
 
-// async function closeValkey() {
-//   if (valkey.status === 'ready') {
-//     await valkey.quit();
-//   }
-// }
+valkey.on('error', (err) => {
+  if (err.message.includes('NOAUTH')) {
+    console.warn('Valkey auth required: check credentials.');
+  }
+});
 
-// module.exports = {
-//   valkey,
-//   initValkey,
-//   checkValkey,
-//   closeValkey,
-// };
+async function initValkey() {
+  try {
+    if (valkey.status === 'wait') {
+      await valkey.connect();
+    }
+    const pong = await valkey.ping();
+    if (pong === 'PONG') {
+      console.log('Valkey connected');
+    }
+  } catch (err) {
+    console.error('Valkey connection failed, continuing startup:', err.message);
+  }
+}
+
+async function checkValkey() {
+  try {
+    await valkey.ping();
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function closeValkey() {
+  if (valkey.status !== 'end') {
+    await valkey.quit();
+  }
+}
+
+module.exports = {
+  valkey,
+  initValkey,
+  checkValkey,
+  closeValkey,
+};
