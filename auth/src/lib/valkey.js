@@ -22,7 +22,7 @@ const clusterName = process.env.VALKEY_CLUSTER_NAME; // ElastiCache Replication 
 const region = process.env.AWS_REGION || 'ap-northeast-2';
 
 async function getIamToken() {
-  const { SignatureV4 } = require('@aws-sdk/signature-v4');
+  const { SignatureV4 } = require('@smithy/signature-v4');
   const { Hash } = require('@smithy/hash-node');
   const { defaultProvider } = require('@aws-sdk/credential-provider-node');
 
