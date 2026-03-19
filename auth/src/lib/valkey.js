@@ -17,8 +17,8 @@ const host = requiredEnv('VALKEY_HOST');
 const port = parseInt(process.env.VALKEY_PORT || '6379');
 const useIamAuth = parseBoolean(process.env.VALKEY_USE_IAM_AUTH) ?? false;
 const tlsEnabled = parseBoolean(process.env.VALKEY_TLS) ?? false;
-const userId = process.env.VALKEY_USER; // IAM 인증 시 ElastiCache User ID
-const clusterName = process.env.VALKEY_CLUSTER_NAME; // ElastiCache Replication Group ID
+const userId = process.env.VALKEY_USER;
+const clusterName = process.env.VALKEY_CLUSTER_NAME;
 const region = process.env.AWS_REGION || 'ap-northeast-2';
 
 async function getIamToken() {
@@ -48,8 +48,15 @@ async function getIamToken() {
     { expiresIn: 900 },
   );
 
-  const params = new URLSearchParams(signed.query || {});
-  return `https://${signed.hostname}${signed.path}?${params.toString()}`;
+  const qs = Object.entries(signed.query || {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join('&');
+  const token = `https://${signed.hostname}${signed.path}?${qs}`;
+
+  // 디버그: 토큰 앞 120자 출력 (운영 전 제거)
+  console.log('[DEBUG] Valkey IAM token (first 120):', token.slice(0, 120));
+
+  return token;
 }
 
 function buildOptions(password) {
@@ -71,14 +78,16 @@ function buildOptions(password) {
 let valkey;
 
 async function createClient() {
-  const password = useIamAuth ? await getIamToken() : undefined;
+  let password;
+  if (useIamAuth) {
+    console.log(`[Valkey] IAM auth mode: user=${userId}, cluster=${clusterName}`);
+    password = await getIamToken();
+  }
   valkey = new Redis(buildOptions(password));
 
   valkey.on('error', (err) => {
     console.error('Valkey error:', err.message);
   });
-
-  return valkey;
 }
 
 async function initValkey() {
@@ -90,7 +99,6 @@ async function initValkey() {
     await valkey.ping();
     console.log('Valkey connected');
 
-    // IAM 토큰은 15분 만료 → 10분마다 재발급
     if (useIamAuth) {
       setInterval(async () => {
         try {
