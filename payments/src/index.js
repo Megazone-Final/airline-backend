@@ -26,8 +26,8 @@ app.use('/api/payment', paymentsRoutes);
 
 app.get('/health', async (req, res) => {
   const checks = await Promise.allSettled([checkMySQL(), checkValkey()]);
-  const mysqlOk = checks[0].status === 'fulfilled';
-  const valkeyOk = checks[1].status === 'fulfilled';
+  const mysqlOk = checks[0].status === 'fulfilled' && checks[0].value === true;
+  const valkeyOk = checks[1].status === 'fulfilled' && checks[1].value === true;
   const status = mysqlOk && valkeyOk ? 'ok' : 'degraded';
 
   res.status(status === 'ok' ? 200 : 503).json({
@@ -44,8 +44,12 @@ async function start() {
   await initMySQL();
   console.log('MySQL connected');
 
-  await initValkey();
-  console.log('Valkey connected');
+  const valkeyReady = await initValkey();
+  if (valkeyReady) {
+    console.log('Valkey connected');
+  } else {
+    console.warn('Valkey unavailable, service started in degraded mode');
+  }
 
   app.listen(PORT, () => {
     console.log(`Payment service running on port ${PORT}`);

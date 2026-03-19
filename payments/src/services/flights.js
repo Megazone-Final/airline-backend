@@ -1,11 +1,31 @@
-const FLIGHTS_SERVICE_URL = (process.env.FLIGHTS_SERVICE_URL || 'http://localhost:3002').replace(
+const FLIGHTS_SERVICE_URL = (process.env.FLIGHTS_SERVICE_URL || 'http://svc-flight.airline-flight.svc:3000').replace(
   /\/$/,
   ''
 );
 
-async function parseJson(response) {
+async function parseResponseBody(response) {
   const text = await response.text();
-  return text ? JSON.parse(text) : null;
+  if (!text) {
+    return { data: null, text: '' };
+  }
+
+  try {
+    return { data: JSON.parse(text), text };
+  } catch (err) {
+    return { data: null, text };
+  }
+}
+
+function buildErrorMessage(body, text) {
+  if (body && typeof body === 'object' && body.message) {
+    return body.message;
+  }
+
+  if (text) {
+    return text.slice(0, 300);
+  }
+
+  return 'Flight service request failed';
 }
 
 async function request(path, options = {}) {
@@ -18,10 +38,22 @@ async function request(path, options = {}) {
     signal: AbortSignal.timeout(5000),
   });
 
-  const body = await parseJson(response);
+  const { data: body, text } = await parseResponseBody(response);
   if (!response.ok) {
-    const error = new Error(body?.message || 'Flight service request failed');
+    const error = new Error(buildErrorMessage(body, text));
     error.statusCode = response.status;
+    error.responseBody = body ?? text;
+    throw error;
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  if (body === null) {
+    const error = new Error('Flight service returned a non-JSON response');
+    error.statusCode = 502;
+    error.responseBody = text;
     throw error;
   }
 
