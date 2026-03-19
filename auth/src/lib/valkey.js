@@ -33,21 +33,23 @@ async function getIamToken() {
     sha256: Hash.bind(null, 'sha256'),
   });
 
-  const url = new URL(`https://${clusterName}/?Action=connect&User=${userId}`);
-  const request = {
-    method: 'GET',
-    protocol: url.protocol,
-    hostname: url.hostname,
-    path: url.pathname + url.search,
-    headers: { host: url.hostname },
-  };
+  const signed = await signer.presign(
+    {
+      method: 'GET',
+      protocol: 'https:',
+      hostname: clusterName,
+      path: '/',
+      query: {
+        Action: 'connect',
+        User: userId,
+      },
+      headers: { host: clusterName },
+    },
+    { expiresIn: 900 },
+  );
 
-  const signed = await signer.presign(request, { expiresIn: 900 });
-  const queryString = Object.entries(signed.query || {})
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join('&');
-
-  return `${url.pathname}?${queryString}`;
+  const params = new URLSearchParams(signed.query || {});
+  return `https://${signed.hostname}${signed.path}?${params.toString()}`;
 }
 
 function buildOptions(password) {
