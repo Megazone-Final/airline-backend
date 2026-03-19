@@ -63,8 +63,9 @@
 
 ### `FLIGHTS_SERVICE_URL`
 - 의미: flights 서비스의 기본 URL입니다.
-- 예시: `http://svc-flight.airline-flight.svc:3000`
+- 예시: `http://svc-flight.flight.svc`
 - 설명: 결제 생성 시 항공편 조회와 예약 생성 요청을 이 서비스로 보냅니다.
+- 설명: 여러 후보 주소를 시도하려면 쉼표로 구분해 넣을 수 있습니다.
 
 ### `INTERNAL_API_KEY`
 - 의미: flights 서비스의 내부 API 보호용 키입니다.
