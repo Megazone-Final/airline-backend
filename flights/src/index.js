@@ -23,8 +23,8 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
-app.use('/api/flight', flightsRoutes);
 app.use('/api/flight/reservations', reservationsRoutes);
+app.use('/api/flight', flightsRoutes);
 app.use('/internal', internalRouter);
 
 app.get('/health', async (req, res) => {
