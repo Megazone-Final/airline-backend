@@ -1,4 +1,4 @@
-const { valkey } = require('../lib/valkey');
+const { getValkeyClient } = require('../lib/valkey');
 
 const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS || 60 * 60 * 24 * 7);
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'session_token';
@@ -9,6 +9,11 @@ function buildSessionKey(token) {
 }
 
 async function getSession(token) {
+  const valkey = getValkeyClient();
+  if (!valkey) {
+    throw new Error('Valkey is not configured');
+  }
+
   const raw = await valkey.get(buildSessionKey(token));
   if (!raw) {
     return null;
@@ -23,6 +28,11 @@ async function getSession(token) {
 }
 
 async function touchSession(token, session) {
+  const valkey = getValkeyClient();
+  if (!valkey) {
+    throw new Error('Valkey is not configured');
+  }
+
   const refreshedSession = {
     ...session,
     lastSeenAt: new Date().toISOString(),

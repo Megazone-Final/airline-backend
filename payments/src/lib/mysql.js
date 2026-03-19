@@ -50,7 +50,7 @@ async function initMySQL() {
       CREATE TABLE IF NOT EXISTS payments (
         id VARCHAR(32) NOT NULL PRIMARY KEY,
         user_id BIGINT UNSIGNED NOT NULL,
-        reservation_id VARCHAR(32) NOT NULL,
+        reservation_id VARCHAR(32) NULL,
         flight_id BIGINT UNSIGNED NOT NULL,
         amount INT NOT NULL,
         method VARCHAR(100) NOT NULL,
@@ -60,6 +60,11 @@ async function initMySQL() {
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY payments_user_idx (user_id, created_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await connection.query(`
+      ALTER TABLE payments
+      MODIFY COLUMN reservation_id VARCHAR(32) NULL
     `);
 
     console.log('✅ payments 테이블 확인 완료');
@@ -73,11 +78,21 @@ async function initMySQL() {
 /**
  * 쿼리 실행용 헬퍼 함수
  */
-async function executeQuery(sql, params) {
+async function runWithConnection(method, sql, params) {
   const connection = await getConnection();
-  const [rows] = await connection.execute(sql, params);
-  await connection.end();
-  return rows;
+  try {
+    return await connection[method](sql, params);
+  } finally {
+    await connection.end();
+  }
+}
+
+async function executeQuery(sql, params) {
+  return runWithConnection('query', sql, params);
+}
+
+async function executeStatement(sql, params) {
+  return runWithConnection('execute', sql, params);
 }
 
 /**
@@ -87,6 +102,7 @@ async function checkMySQL() {
   const conn = await getConnection();
   await conn.query('SELECT 1');
   await conn.end();
+  return true;
 }
 
 async function closeMySQL() {
@@ -97,5 +113,8 @@ module.exports = {
   initMySQL,
   checkMySQL,
   closeMySQL,
-  pool: { query: executeQuery },
+  pool: {
+    query: executeQuery,
+    execute: executeStatement,
+  },
 };

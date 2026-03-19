@@ -27,7 +27,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: airline-payment
+  name: svc-payment
   namespace: airline-payment
 spec:
   selector:
