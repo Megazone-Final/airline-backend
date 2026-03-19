@@ -61,7 +61,7 @@ async function request(path, options = {}) {
 }
 
 async function getFlightDetail(flightId) {
-  return request(`/flights/${flightId}`);
+  return request(`/api/flight/${flightId}`);
 }
 
 async function createReservation(payload) {
