@@ -1,5 +1,23 @@
+const fs = require('node:fs');
 const mysql = require('mysql2/promise');
 const { Signer } = require('@aws-sdk/rds-signer');
+
+function parseBoolean(value) {
+  if (value == null) {
+    return undefined;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
+}
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -33,6 +51,49 @@ function getBaseConfig() {
   };
 }
 
+function isProxyHost(host) {
+  return host.includes('.proxy-');
+}
+
+function buildSslOptions(host) {
+  const sslFlag = parseBoolean(process.env.DB_SSL);
+  const sslMode = String(process.env.DB_SSL_MODE || '').trim().toLowerCase();
+
+  if (sslFlag === false || sslMode === 'disabled') {
+    return undefined;
+  }
+
+  const shouldUseSsl =
+    sslFlag === true ||
+    ['preferred', 'required', 'verify_ca', 'verify_identity'].includes(sslMode) ||
+    host.endsWith('.rds.amazonaws.com');
+
+  if (!shouldUseSsl) {
+    return undefined;
+  }
+
+  const ssl = {};
+  const caPath = process.env.DB_SSL_CA_PATH;
+  const caValue = process.env.DB_SSL_CA;
+  const rejectUnauthorized = parseBoolean(process.env.DB_SSL_REJECT_UNAUTHORIZED);
+
+  // RDS Proxy presents ACM certificates, so use the system trust store unless
+  // a non-proxy endpoint explicitly needs the RDS bundle.
+  if (!isProxyHost(host)) {
+    if (caPath) {
+      ssl.ca = fs.readFileSync(caPath, 'utf8');
+    } else if (caValue) {
+      ssl.ca = caValue.replace(/\\n/g, '\n');
+    }
+  }
+
+  if (rejectUnauthorized !== undefined) {
+    ssl.rejectUnauthorized = rejectUnauthorized;
+  }
+
+  return ssl;
+}
+
 /**
  * IAM 토큰을 생성하고 DB 연결 객체를 반환하는 공통 함수
  * (중복 코드를 줄이고 보안 설정을 일원화합니다)
@@ -52,7 +113,7 @@ async function getConnection(role = 'writer') {
     password: token,
     database: requiredEnv('DB_NAME'),
     port: baseConfig.port,
-    ssl: 'Amazon RDS',
+    ssl: buildSslOptions(hostname),
     authPlugins: {
       mysql_clear_password: () => () => Buffer.from(`${token}\0`),
     },
