@@ -17,6 +17,7 @@ app.use(
   cors({
     origin: corsOrigins.length > 0 ? corsOrigins : true,
     credentials: true,
+    exposedHeaders: ['X-Debug-Session-Token'],
   })
 );
 app.use(cookieParser());
