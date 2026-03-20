@@ -66,7 +66,7 @@ async function getIamToken() {
     .map(([k, v]) => `${k}=${v}`)
     .join('&');
 
-  return `https://${signed.hostname}${signed.path}?${qs}`;
+  return `${signed.hostname}${signed.path}?${qs}`;
 }
 
 function buildUrlClient() {
