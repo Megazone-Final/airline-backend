@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { pool } = require('../lib/mysql');
+const { readerPool, writerPool } = require('../lib/mysql');
 
 function formatDate(value) {
   return value instanceof Date ? value.toISOString().split('T')[0] : value;
@@ -39,7 +39,7 @@ async function createPayment({
 }) {
   const paymentId = buildPaymentId();
 
-  await pool.execute(
+  await writerPool.execute(
     `
       INSERT INTO payments (
         id,
@@ -66,7 +66,7 @@ async function createPayment({
     ]
   );
 
-  return findPaymentByIdForUser(paymentId, userId);
+  return findPaymentByIdForUserWithPool(writerPool, paymentId, userId);
 }
 
 async function createPendingPayment({
@@ -79,7 +79,7 @@ async function createPendingPayment({
 }) {
   const paymentId = buildPaymentId();
 
-  await pool.execute(
+  await writerPool.execute(
     `
       INSERT INTO payments (
         id,
@@ -106,11 +106,11 @@ async function createPendingPayment({
     ]
   );
 
-  return findPaymentByIdForUser(paymentId, userId);
+  return findPaymentByIdForUserWithPool(writerPool, paymentId, userId);
 }
 
 async function completePayment(paymentId, userId, reservationId) {
-  await pool.execute(
+  await writerPool.execute(
     `
       UPDATE payments
       SET reservation_id = ?, status = 'completed'
@@ -119,11 +119,11 @@ async function completePayment(paymentId, userId, reservationId) {
     [reservationId, paymentId, userId]
   );
 
-  return findPaymentByIdForUser(paymentId, userId);
+  return findPaymentByIdForUserWithPool(writerPool, paymentId, userId);
 }
 
 async function failPayment(paymentId, userId) {
-  await pool.execute(
+  await writerPool.execute(
     `
       UPDATE payments
       SET status = 'failed'
@@ -132,11 +132,11 @@ async function failPayment(paymentId, userId) {
     [paymentId, userId]
   );
 
-  return findPaymentByIdForUser(paymentId, userId);
+  return findPaymentByIdForUserWithPool(writerPool, paymentId, userId);
 }
 
 async function listPaymentsByUser(userId) {
-  const [rows] = await pool.execute(
+  const [rows] = await readerPool.execute(
     `
       SELECT
         id,
@@ -155,7 +155,7 @@ async function listPaymentsByUser(userId) {
   return rows.map(mapPayment);
 }
 
-async function findPaymentByIdForUser(id, userId) {
+async function findPaymentByIdForUserWithPool(pool, id, userId) {
   const [rows] = await pool.execute(
     `
       SELECT
@@ -191,6 +191,15 @@ async function findPaymentByIdForUser(id, userId) {
     passengerCount: payment.passengerCount,
     flightId: payment.flightId,
   };
+}
+
+async function findPaymentByIdForUser(id, userId) {
+  let payment = await findPaymentByIdForUserWithPool(readerPool, id, userId);
+  if (!payment) {
+    payment = await findPaymentByIdForUserWithPool(writerPool, id, userId);
+  }
+
+  return payment;
 }
 
 module.exports = {

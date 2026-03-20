@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { pool } = require('../lib/mysql');
+const { readerPool, writerPool } = require('../lib/mysql');
 
 function normalizeEmail(email) {
   return String(email).trim().toLowerCase();
@@ -23,7 +23,7 @@ async function createUser({ name, email, password, phone }) {
   const passwordHash = await bcrypt.hash(password, 12);
 
   try {
-    const [result] = await pool.execute(
+    const [result] = await writerPool.execute(
       `
         INSERT INTO users (name, email, password_hash, phone)
         VALUES (?, ?, ?, ?)
@@ -31,7 +31,7 @@ async function createUser({ name, email, password, phone }) {
       [String(name).trim(), normalizeEmail(email), passwordHash, String(phone).trim()]
     );
 
-    return findUserById(result.insertId);
+    return findUserByIdWithPool(writerPool, result.insertId);
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       const duplicateError = new Error('이미 사용 중인 이메일입니다');
@@ -43,7 +43,7 @@ async function createUser({ name, email, password, phone }) {
   }
 }
 
-async function findUserByEmail(email) {
+async function findUserByEmailWithPool(pool, email) {
   const [rows] = await pool.execute(
     `
       SELECT
@@ -63,7 +63,16 @@ async function findUserByEmail(email) {
   return rows[0] || null;
 }
 
-async function findUserById(id) {
+async function findUserByEmail(email) {
+  const user = await findUserByEmailWithPool(readerPool, email);
+  if (user) {
+    return user;
+  }
+
+  return findUserByEmailWithPool(writerPool, email);
+}
+
+async function findUserByIdWithPool(pool, id) {
   const [rows] = await pool.execute(
     `
       SELECT
@@ -80,6 +89,15 @@ async function findUserById(id) {
   );
 
   return mapUser(rows[0]);
+}
+
+async function findUserById(id) {
+  let user = await findUserByIdWithPool(readerPool, id);
+  if (!user) {
+    user = await findUserByIdWithPool(writerPool, id);
+  }
+
+  return user;
 }
 
 async function comparePassword(candidatePassword, passwordHash) {

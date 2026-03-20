@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { pool } = require('../lib/mysql');
+const { readerPool, writerPool } = require('../lib/mysql');
 
 function formatDate(value) {
   return value instanceof Date ? value.toISOString().split('T')[0] : value;
@@ -39,7 +39,7 @@ function createReservationId() {
 }
 
 async function listReservationsByUser(userId) {
-  const [rows] = await pool.execute(
+  const [rows] = await readerPool.execute(
     `
       SELECT
         id,
@@ -63,7 +63,7 @@ async function listReservationsByUser(userId) {
 }
 
 async function findReservationByIdForUser(id, userId) {
-  const [rows] = await pool.execute(
+  const [rows] = await readerPool.execute(
     `
       SELECT
         id,
@@ -88,7 +88,7 @@ async function findReservationByIdForUser(id, userId) {
     return null;
   }
 
-  const [passengerRows] = await pool.execute(
+  const [passengerRows] = await readerPool.execute(
     `
       SELECT
         last_name AS lastName,
@@ -127,7 +127,7 @@ async function createReservation({
   passengers,
   totalPrice,
 }) {
-  const connection = await pool.getConnection();
+  const connection = await writerPool.getConnection();
 
   try {
     await connection.beginTransaction();
