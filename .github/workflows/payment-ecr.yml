@@ -5,7 +5,7 @@ on:
         branches:
             - main
         paths:
-            - "payments/**"
+            - "payment/**"
 
 permissions:
     id-token: write
@@ -35,6 +35,6 @@ jobs:
                   REPOSITORY: airline-backend/payments
                   IMAGE_TAG: ${{ github.sha }}
               run: |
-                  docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest ./payments
+                  docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest ./payment
                   docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
                   docker push $REGISTRY/$REPOSITORY:latest
