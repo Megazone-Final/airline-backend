@@ -127,6 +127,10 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+
     res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
 });
@@ -138,6 +142,10 @@ router.post('/logout', auth, async (req, res) => {
     res.clearCookie(SESSION_COOKIE_NAME, getSessionCookieClearOptions());
     res.json({ message: '로그아웃되었습니다' });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+
     res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
 });
@@ -151,6 +159,10 @@ router.get('/profile', auth, async (req, res) => {
     }
     res.json(user);
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+
     res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
 });
