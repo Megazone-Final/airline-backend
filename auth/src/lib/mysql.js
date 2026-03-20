@@ -94,10 +94,13 @@ function createPool(password) {
     queueLimit: 0,
     authPlugins: isIamAuthEnabled()
       ? {
-          mysql_clear_password: () => () => Buffer.from(`${currentPassword}\0`),
+        mysql_clear_password: () => (data) => {
+          return Buffer.from(currentPassword + '\0');
         }
+      }
       : undefined,
   });
+
 
   return activePool;
 }

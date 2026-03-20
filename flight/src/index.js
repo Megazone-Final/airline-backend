@@ -1,13 +1,14 @@
-require('dotenv').config();
+const path = require('node:path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const paymentsRoutes = require('./routes/payments');
+const flightsRoutes = require('./routes/flights');
+const { router: reservationsRoutes, internalRouter } = require('./routes/reservations');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
-const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3002;
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -22,20 +23,21 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
-app.use('/payments', paymentsRoutes);
+app.use('/api/flight/reservations', reservationsRoutes);
+app.use('/api/flight', flightsRoutes);
+app.use('/internal', internalRouter);
 
 app.get('/health', async (req, res) => {
-  const checks = await Promise.allSettled([checkMySQL(), checkValkey()]);
-  const mysqlOk = checks[0].status === 'fulfilled';
-  const valkeyOk = checks[1].status === 'fulfilled';
-  const status = mysqlOk && valkeyOk ? 'ok' : 'degraded';
+  const mysqlOk = await checkMySQL()
+    .then(() => true)
+    .catch(() => false);
+  const status = mysqlOk ? 'ok' : 'degraded';
 
   res.status(status === 'ok' ? 200 : 503).json({
     status,
-    service: 'payments',
+    service: 'flights',
     dependencies: {
       mysql: mysqlOk ? 'ok' : 'error',
-      valkey: valkeyOk ? 'ok' : 'error',
     },
   });
 });
@@ -44,17 +46,14 @@ async function start() {
   await initMySQL();
   console.log('MySQL connected');
 
-  await initValkey();
-  console.log('Valkey connected');
-
   app.listen(PORT, () => {
-    console.log(`Payment service running on port ${PORT}`);
+    console.log(`Flight service running on port ${PORT}`);
   });
 }
 
 async function shutdown(signal) {
   console.log(`${signal} received, shutting down`);
-  await Promise.allSettled([closeMySQL(), closeValkey()]);
+  await closeMySQL();
   process.exit(0);
 }
 

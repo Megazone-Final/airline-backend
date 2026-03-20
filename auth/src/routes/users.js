@@ -60,11 +60,24 @@ function validateRegistration(body) {
   return null;
 }
 
+
+function normalizePhone(phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 11) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return String(phone).trim();
+}
+
 // POST /users/register
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
-    const validationMessage = validateRegistration(req.body);
+    const { name, email, password } = req.body;
+    const phone = normalizePhone(req.body.phone || '');
+    const validationMessage = validateRegistration({ ...req.body, phone });
 
     if (validationMessage) {
       return res.status(400).json({ message: validationMessage });
