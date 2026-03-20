@@ -50,7 +50,7 @@ async function getIamToken() {
   const signed = await signer.presign(
     {
       method: 'GET',
-      protocol: 'https:',
+      protocol: 'http:',
       hostname: clusterName,
       path: '/',
       query: {
@@ -63,7 +63,7 @@ async function getIamToken() {
   );
 
   const qs = Object.entries(signed.query || {})
-    .map(([k, v]) => `${k}=${v}`)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
     .join('&');
 
   return `${signed.hostname}${signed.path}?${qs}`;
