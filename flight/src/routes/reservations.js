@@ -1,5 +1,4 @@
 const express = require('express');
-const auth = require('../middleware/auth');
 const internal = require('../middleware/internal');
 const {
   listReservationsByUser,
@@ -12,19 +11,19 @@ const internalRouter = express.Router();
 
 function validateReservationPayload(body) {
   if (!body.userId) {
-    return '사용자 정보가 필요합니다';
+    return '필수값이 누락되었습니다.';
   }
 
   if (!body.flightId) {
-    return '항공편 정보가 필요합니다';
+    return '필수값이 누락되었습니다.';
   }
 
   if (!body.date) {
-    return '출발일이 필요합니다';
+    return '출발일이 누락되었습니다.';
   }
 
   if (!Array.isArray(body.passengers) || body.passengers.length === 0) {
-    return '승객 정보가 필요합니다';
+    return '승객 정보가 누락되었습니다.';
   }
 
   for (const passenger of body.passengers) {
@@ -34,36 +33,36 @@ function validateReservationPayload(body) {
       !passenger.birth ||
       !passenger.passport
     ) {
-      return '유효한 승객 정보를 입력하세요';
+      return '승객 정보가 올바르지 않습니다.';
     }
   }
 
   if (!Number.isFinite(Number(body.totalPrice)) || Number(body.totalPrice) <= 0) {
-    return '총 결제 금액이 올바르지 않습니다';
+    return '결제 금액이 유효하지 않습니다.';
   }
 
   return null;
 }
 
-router.get('/', auth, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const reservations = await listReservationsByUser(req.user.id);
+    const reservations = await listReservationsByUser(1);
     res.json(reservations);
   } catch (err) {
-    res.status(500).json({ message: '서버 오류가 발생했습니다' });
+    res.status(500).json({ message: '내부 오류가 발생했습니다.' });
   }
 });
 
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const reservation = await findReservationByIdForUser(req.params.id, req.user.id);
+    const reservation = await findReservationByIdForUser(req.params.id, 1);
     if (!reservation) {
-      return res.status(404).json({ message: '예약을 찾을 수 없습니다' });
+      return res.status(404).json({ message: '예약 정보를 찾을 수 없습니다.' });
     }
 
     return res.json(reservation);
   } catch (err) {
-    return res.status(500).json({ message: '서버 오류가 발생했습니다' });
+    return res.status(500).json({ message: '내부 오류가 발생했습니다.' });
   }
 });
 
@@ -89,7 +88,7 @@ internalRouter.post('/reservations', internal, async (req, res) => {
       return res.status(err.statusCode).json({ message: err.message });
     }
 
-    return res.status(500).json({ message: '서버 오류가 발생했습니다' });
+    return res.status(500).json({ message: '내부 오류가 발생했습니다.' });
   }
 });
 

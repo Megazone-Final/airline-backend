@@ -76,7 +76,9 @@ function buildUrlClient() {
 
   return new Redis(valkeyUrl, {
     ...createRetryOptions(),
-    tls: valkeyUrl.startsWith('rediss://') ? { checkServerIdentity: () => undefined } : undefined,
+    tls: valkeyUrl.startsWith('rediss://')
+      ? { checkServerIdentity: () => undefined }
+      : undefined,
   });
 }
 
