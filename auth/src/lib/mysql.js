@@ -2,6 +2,9 @@ const fs = require('node:fs');
 const mysql = require('mysql2/promise');
 const { Signer } = require('@aws-sdk/rds-signer');
 
+const DEFAULT_DB_HOST =
+  'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com';
+
 function parseBoolean(value) {
   if (value == null) {
     return undefined;
@@ -27,9 +30,23 @@ function isIamAuthEnabled() {
   return flag ?? legacyFlag ?? mode === 'iam';
 }
 
-function buildSslOptions() {
-  const host =
-    process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com';
+function getDbHost(role = 'writer') {
+  if (role === 'reader') {
+    return process.env.DB_READER_HOST || process.env.DB_WRITER_HOST || process.env.DB_HOST || DEFAULT_DB_HOST;
+  }
+
+  return process.env.DB_WRITER_HOST || process.env.DB_HOST || DEFAULT_DB_HOST;
+}
+
+function getResolvedRole(role = 'writer') {
+  if (role === 'reader' && getDbHost('reader') === getDbHost('writer')) {
+    return 'writer';
+  }
+
+  return role;
+}
+
+function buildSslOptions(host) {
   const sslFlag = parseBoolean(process.env.DB_SSL);
   const sslMode = String(process.env.DB_SSL_MODE || '').trim().toLowerCase();
 
@@ -64,10 +81,10 @@ function buildSslOptions() {
   return ssl;
 }
 
-async function getIamAuthToken() {
+async function getIamAuthToken(role = 'writer') {
+  const host = getDbHost(role);
   const signer = new Signer({
-    hostname:
-      process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com',
+    hostname: host,
     port: Number(process.env.DB_PORT || 3306),
     username: process.env.DB_USER || 'auth_user',
     region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-northeast-2',
@@ -76,88 +93,125 @@ async function getIamAuthToken() {
   return signer.getAuthToken();
 }
 
-let activePool;
-let currentPassword = process.env.DB_PASSWORD || '';
+const activePools = {};
+const currentPasswords = {};
 
-function createPool(password) {
-  currentPassword = password;
-  activePool = mysql.createPool({
-    host:
-      process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com',
+function createPool(role, password) {
+  const resolvedRole = getResolvedRole(role);
+  currentPasswords[resolvedRole] = password;
+
+  activePools[resolvedRole] = mysql.createPool({
+    host: getDbHost(resolvedRole),
     port: Number(process.env.DB_PORT || 3306),
     user: process.env.DB_USER || 'auth_user',
     password,
     database: process.env.DB_NAME || 'auth',
-    ssl: buildSslOptions(),
+    ssl: buildSslOptions(getDbHost(resolvedRole)),
     waitForConnections: true,
     connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
     queueLimit: 0,
     authPlugins: isIamAuthEnabled()
       ? {
-        mysql_clear_password: () => (data) => {
-          return Buffer.from(currentPassword + '\0');
+          mysql_clear_password: () => () => Buffer.from(`${currentPasswords[resolvedRole]}\0`),
         }
-      }
       : undefined,
   });
 
-
-  return activePool;
+  return activePools[resolvedRole];
 }
 
-function getActivePool() {
-  if (!activePool) {
-    createPool(process.env.DB_PASSWORD || '');
+function getActivePool(role = 'writer') {
+  const resolvedRole = getResolvedRole(role);
+
+  if (!activePools[resolvedRole]) {
+    createPool(resolvedRole, process.env.DB_PASSWORD || '');
   }
 
-  return activePool;
+  return activePools[resolvedRole];
 }
 
-const pool = {
+async function initPool(role = 'writer') {
+  const resolvedRole = getResolvedRole(role);
+
+  if (activePools[resolvedRole]) {
+    return activePools[resolvedRole];
+  }
+
+  if (isIamAuthEnabled()) {
+    const token = await getIamAuthToken(resolvedRole);
+    const pool = createPool(resolvedRole, token);
+
+    setInterval(async () => {
+      try {
+        const newToken = await getIamAuthToken(resolvedRole);
+        currentPasswords[resolvedRole] = newToken;
+        pool.pool.config.connectionConfig.password = newToken;
+      } catch (err) {
+        console.error(`Failed to refresh RDS IAM token for ${resolvedRole}:`, err);
+      }
+    }, 10 * 60 * 1000).unref();
+
+    return pool;
+  }
+
+  return createPool(resolvedRole, process.env.DB_PASSWORD || '');
+}
+
+const writerPool = {
   query(...args) {
-    return getActivePool().query(...args);
+    return getActivePool('writer').query(...args);
   },
   execute(...args) {
-    return getActivePool().execute(...args);
+    return getActivePool('writer').execute(...args);
   },
   getConnection(...args) {
-    return getActivePool().getConnection(...args);
+    return getActivePool('writer').getConnection(...args);
   },
   end(...args) {
-    if (!activePool) {
+    const pool = activePools.writer;
+    if (!pool) {
       return Promise.resolve();
     }
 
-    return activePool.end(...args);
+    return pool.end(...args);
+  },
+};
+
+const readerPool = {
+  query(...args) {
+    return getActivePool('reader').query(...args);
+  },
+  execute(...args) {
+    return getActivePool('reader').execute(...args);
+  },
+  getConnection(...args) {
+    return getActivePool('reader').getConnection(...args);
+  },
+  end(...args) {
+    const resolvedRole = getResolvedRole('reader');
+    const pool = activePools[resolvedRole];
+    if (!pool) {
+      return Promise.resolve();
+    }
+
+    return pool.end(...args);
   },
 };
 
 async function initMySQL() {
-  if (isIamAuthEnabled()) {
-    const token = await getIamAuthToken();
-    createPool(token);
+  await initPool('writer');
+  await writerPool.query('SELECT 1');
 
-    setInterval(async () => {
-      try {
-        const newToken = await getIamAuthToken();
-        const currentPool = getActivePool();
-        currentPassword = newToken;
-        currentPool.pool.config.connectionConfig.password = newToken;
-      } catch (err) {
-        console.error('Failed to refresh RDS IAM token:', err);
-      }
-    }, 10 * 60 * 1000).unref();
-  } else {
-    createPool(process.env.DB_PASSWORD || '');
+  if (getResolvedRole('reader') !== 'writer') {
+    await initPool('reader');
+    await readerPool.query('SELECT 1');
   }
-
-  await pool.query('SELECT 1');
 
   if (process.env.DB_AUTO_INIT === 'false') {
     return;
   }
 
-  await pool.query(`
+  await writerPool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(100) NOT NULL,
@@ -171,15 +225,24 @@ async function initMySQL() {
 }
 
 async function checkMySQL() {
-  await pool.query('SELECT 1');
+  await writerPool.query('SELECT 1');
+
+  if (getResolvedRole('reader') !== 'writer') {
+    await readerPool.query('SELECT 1');
+  }
 }
 
 async function closeMySQL() {
-  await pool.end();
+  const pools = Object.values(activePools).filter(Boolean);
+  const uniquePools = [...new Set(pools)];
+
+  await Promise.all(uniquePools.map((pool) => pool.end()));
 }
 
 module.exports = {
-  pool,
+  pool: writerPool,
+  writerPool,
+  readerPool,
   initMySQL,
   checkMySQL,
   closeMySQL,

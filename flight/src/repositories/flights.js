@@ -1,4 +1,4 @@
-const { pool } = require('../lib/mysql');
+const { readerPool } = require('../lib/mysql');
 
 function mapFlight(row) {
   if (!row) {
@@ -46,7 +46,7 @@ async function listFlights({ departure, arrival, passengers }) {
   }
 
   const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-  const [rows] = await pool.execute(
+  const [rows] = await readerPool.execute(
     `
       SELECT
         id,
@@ -73,7 +73,7 @@ async function listFlights({ departure, arrival, passengers }) {
 }
 
 async function findFlightById(id) {
-  const [rows] = await pool.execute(
+  const [rows] = await readerPool.execute(
     `
       SELECT
         id,

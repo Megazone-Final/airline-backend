@@ -9,27 +9,49 @@ function requiredEnv(name) {
   return value;
 }
 
-const rdsConfig = {
-  region: requiredEnv('AWS_REGION'),
-  hostname: requiredEnv('DB_HOST'),
-  port: Number(process.env.DB_PORT || 3306),
-  username: requiredEnv('DB_USER'),
-};
+function getDbHost(role = 'writer') {
+  if (role === 'reader') {
+    return process.env.DB_READER_HOST || process.env.DB_WRITER_HOST || process.env.DB_HOST || missingDbHost(role);
+  }
 
-const signer = new Signer(rdsConfig);
+  return process.env.DB_WRITER_HOST || process.env.DB_HOST || missingDbHost(role);
+}
+
+function missingDbHost(role) {
+  throw new Error(
+    role === 'reader'
+      ? 'Missing required env: DB_READER_HOST or DB_WRITER_HOST or DB_HOST'
+      : 'Missing required env: DB_WRITER_HOST or DB_HOST'
+  );
+}
+
+function getBaseConfig() {
+  return {
+    region: requiredEnv('AWS_REGION'),
+    port: Number(process.env.DB_PORT || 3306),
+    username: requiredEnv('DB_USER'),
+  };
+}
 
 /**
  * IAM 토큰을 생성하고 DB 연결 객체를 반환하는 공통 함수
  * (중복 코드를 줄이고 보안 설정을 일원화합니다)
  */
-async function getConnection() {
+async function getConnection(role = 'writer') {
+  const baseConfig = getBaseConfig();
+  const hostname = getDbHost(role);
+  const signer = new Signer({
+    ...baseConfig,
+    hostname,
+  });
   const token = await signer.getAuthToken();
+
   return await mysql.createConnection({
-    host: rdsConfig.hostname,
-    user: rdsConfig.username,
+    host: hostname,
+    user: baseConfig.username,
     password: token,
     database: requiredEnv('DB_NAME'),
-    port: rdsConfig.port,
+    port: baseConfig.port,
     ssl: 'Amazon RDS',
     authPlugins: {
       mysql_clear_password: () => () => Buffer.from(`${token}\0`),
@@ -42,9 +64,11 @@ async function getConnection() {
  */
 async function initMySQL() {
   try {
-    const connection = await getConnection();
+    const connection = await getConnection('writer');
 
-    console.log(`✅ RDS IAM 인증 성공 (${rdsConfig.hostname}, user: ${rdsConfig.username})`);
+    console.log(
+      `✅ RDS IAM 인증 성공 (${getDbHost('writer')}, user: ${getBaseConfig().username})`
+    );
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS payments (
@@ -78,8 +102,8 @@ async function initMySQL() {
 /**
  * 쿼리 실행용 헬퍼 함수
  */
-async function runWithConnection(method, sql, params) {
-  const connection = await getConnection();
+async function runWithConnection(role, method, sql, params) {
+  const connection = await getConnection(role);
   try {
     return await connection[method](sql, params);
   } finally {
@@ -88,20 +112,35 @@ async function runWithConnection(method, sql, params) {
 }
 
 async function executeQuery(sql, params) {
-  return runWithConnection('query', sql, params);
+  return runWithConnection('writer', 'query', sql, params);
 }
 
 async function executeStatement(sql, params) {
-  return runWithConnection('execute', sql, params);
+  return runWithConnection('writer', 'execute', sql, params);
+}
+
+async function executeReadQuery(sql, params) {
+  return runWithConnection('reader', 'query', sql, params);
+}
+
+async function executeReadStatement(sql, params) {
+  return runWithConnection('reader', 'execute', sql, params);
 }
 
 /**
  * 헬스 체크용 함수
  */
 async function checkMySQL() {
-  const conn = await getConnection();
-  await conn.query('SELECT 1');
-  await conn.end();
+  const writer = await getConnection('writer');
+  await writer.query('SELECT 1');
+  await writer.end();
+
+  if (getDbHost('reader') !== getDbHost('writer')) {
+    const reader = await getConnection('reader');
+    await reader.query('SELECT 1');
+    await reader.end();
+  }
+
   return true;
 }
 
@@ -116,5 +155,13 @@ module.exports = {
   pool: {
     query: executeQuery,
     execute: executeStatement,
+  },
+  writerPool: {
+    query: executeQuery,
+    execute: executeStatement,
+  },
+  readerPool: {
+    query: executeReadQuery,
+    execute: executeReadStatement,
   },
 };

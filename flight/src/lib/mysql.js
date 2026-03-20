@@ -3,6 +3,9 @@ const mysql = require('mysql2/promise');
 const { Signer } = require('@aws-sdk/rds-signer');
 const seedFlights = require('../data/seedFlights');
 
+const DEFAULT_DB_HOST =
+  'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com';
+
 function parseBoolean(value) {
   if (value == null) {
     return undefined;
@@ -20,8 +23,27 @@ function parseBoolean(value) {
   return undefined;
 }
 
-function buildSslOptions() {
-  const host = process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com';
+function isIamAuthEnabled() {
+  return parseBoolean(process.env.DB_IAM_AUTH) === true;
+}
+
+function getDbHost(role = 'writer') {
+  if (role === 'reader') {
+    return process.env.DB_READER_HOST || process.env.DB_WRITER_HOST || process.env.DB_HOST || DEFAULT_DB_HOST;
+  }
+
+  return process.env.DB_WRITER_HOST || process.env.DB_HOST || DEFAULT_DB_HOST;
+}
+
+function getResolvedRole(role = 'writer') {
+  if (role === 'reader' && getDbHost('reader') === getDbHost('writer')) {
+    return 'writer';
+  }
+
+  return role;
+}
+
+function buildSslOptions(host) {
   const sslFlag = parseBoolean(process.env.DB_SSL);
   const sslMode = String(process.env.DB_SSL_MODE || '').trim().toLowerCase();
 
@@ -56,9 +78,10 @@ function buildSslOptions() {
   return ssl;
 }
 
-async function getIamAuthToken() {
+async function getIamAuthToken(role = 'writer') {
+  const host = getDbHost(role);
   const signer = new Signer({
-    hostname: process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com',
+    hostname: host,
     port: Number(process.env.DB_PORT || 3306),
     username: process.env.DB_USER || 'flight_user',
     region: process.env.AWS_REGION || 'ap-northeast-2',
@@ -66,60 +89,113 @@ async function getIamAuthToken() {
   return signer.getAuthToken();
 }
 
-let activePool;
-let currentPassword = process.env.DB_PASSWORD || '';
+const activePools = {};
+const currentPasswords = {};
 
-function createPool(password) {
-  currentPassword = password;
-  activePool = mysql.createPool({
-    host: process.env.DB_HOST || 'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com',
+function createPool(role, password) {
+  const resolvedRole = getResolvedRole(role);
+  currentPasswords[resolvedRole] = password;
+
+  activePools[resolvedRole] = mysql.createPool({
+    host: getDbHost(resolvedRole),
     port: Number(process.env.DB_PORT || 3306),
     user: process.env.DB_USER || 'flight_user',
     password,
     database: process.env.DB_NAME || 'flights',
-    ssl: buildSslOptions(),
+    ssl: buildSslOptions(getDbHost(resolvedRole)),
     waitForConnections: true,
     connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
     queueLimit: 0,
-    authPlugins: parseBoolean(process.env.DB_IAM_AUTH)
+    authPlugins: isIamAuthEnabled()
       ? {
-          mysql_clear_password: () => () => Buffer.from(`${currentPassword}\0`),
+          mysql_clear_password: () => () => Buffer.from(`${currentPasswords[resolvedRole]}\0`),
         }
       : undefined,
   });
 
-  return activePool;
+  return activePools[resolvedRole];
 }
 
-function getActivePool() {
-  if (!activePool) {
-    createPool(process.env.DB_PASSWORD || '');
+function getActivePool(role = 'writer') {
+  const resolvedRole = getResolvedRole(role);
+
+  if (!activePools[resolvedRole]) {
+    createPool(resolvedRole, process.env.DB_PASSWORD || '');
   }
 
-  return activePool;
+  return activePools[resolvedRole];
 }
 
-const pool = {
+async function initPool(role = 'writer') {
+  const resolvedRole = getResolvedRole(role);
+
+  if (activePools[resolvedRole]) {
+    return activePools[resolvedRole];
+  }
+
+  if (isIamAuthEnabled()) {
+    const token = await getIamAuthToken(resolvedRole);
+    const pool = createPool(resolvedRole, token);
+
+    setInterval(async () => {
+      try {
+        const newToken = await getIamAuthToken(resolvedRole);
+        currentPasswords[resolvedRole] = newToken;
+        pool.pool.config.connectionConfig.password = newToken;
+      } catch (err) {
+        console.error(`Failed to refresh RDS IAM token for ${resolvedRole}:`, err);
+      }
+    }, 10 * 60 * 1000).unref();
+
+    return pool;
+  }
+
+  return createPool(resolvedRole, process.env.DB_PASSWORD || '');
+}
+
+const writerPool = {
   query(...args) {
-    return getActivePool().query(...args);
+    return getActivePool('writer').query(...args);
   },
   execute(...args) {
-    return getActivePool().execute(...args);
+    return getActivePool('writer').execute(...args);
   },
   getConnection(...args) {
-    return getActivePool().getConnection(...args);
+    return getActivePool('writer').getConnection(...args);
   },
   end(...args) {
-    if (!activePool) {
+    const pool = activePools.writer;
+    if (!pool) {
       return Promise.resolve();
     }
 
-    return activePool.end(...args);
+    return pool.end(...args);
+  },
+};
+
+const readerPool = {
+  query(...args) {
+    return getActivePool('reader').query(...args);
+  },
+  execute(...args) {
+    return getActivePool('reader').execute(...args);
+  },
+  getConnection(...args) {
+    return getActivePool('reader').getConnection(...args);
+  },
+  end(...args) {
+    const resolvedRole = getResolvedRole('reader');
+    const pool = activePools[resolvedRole];
+    if (!pool) {
+      return Promise.resolve();
+    }
+
+    return pool.end(...args);
   },
 };
 
 async function createTables() {
-  await pool.query(`
+  await writerPool.query(`
     CREATE TABLE IF NOT EXISTS flights (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       airline VARCHAR(100) NOT NULL,
@@ -139,7 +215,7 @@ async function createTables() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  await pool.query(`
+  await writerPool.query(`
     CREATE TABLE IF NOT EXISTS reservations (
       id VARCHAR(32) NOT NULL PRIMARY KEY,
       user_id BIGINT UNSIGNED NOT NULL,
@@ -161,7 +237,7 @@ async function createTables() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  await pool.query(`
+  await writerPool.query(`
     CREATE TABLE IF NOT EXISTS reservation_passengers (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       reservation_id VARCHAR(32) NOT NULL,
@@ -182,7 +258,7 @@ async function seedFlightData() {
     return;
   }
 
-  const [rows] = await pool.query('SELECT COUNT(*) AS count FROM flights');
+  const [rows] = await writerPool.query('SELECT COUNT(*) AS count FROM flights');
   if (rows[0].count > 0) {
     return;
   }
@@ -205,7 +281,7 @@ async function seedFlightData() {
   `;
 
   for (const flight of seedFlights) {
-    await pool.execute(sql, [
+    await writerPool.execute(sql, [
       flight.airline,
       flight.flightNo,
       flight.departure,
@@ -223,26 +299,13 @@ async function seedFlightData() {
 }
 
 async function initMySQL() {
-  if (parseBoolean(process.env.DB_IAM_AUTH)) {
-    const token = await getIamAuthToken();
-    createPool(token);
+  await initPool('writer');
+  await writerPool.query('SELECT 1');
 
-    // Refresh token every 10 minutes (tokens expire in 15 mins)
-    setInterval(async () => {
-      try {
-        const newToken = await getIamAuthToken();
-        const currentPool = getActivePool();
-        currentPassword = newToken;
-        currentPool.pool.config.connectionConfig.password = newToken;
-      } catch (err) {
-        console.error('Failed to refresh RDS IAM token:', err);
-      }
-    }, 10 * 60 * 1000).unref(); // unref to allow process exit
-  } else {
-    createPool(process.env.DB_PASSWORD || '');
+  if (getResolvedRole('reader') !== 'writer') {
+    await initPool('reader');
+    await readerPool.query('SELECT 1');
   }
-
-  await pool.query('SELECT 1');
 
   if (process.env.DB_AUTO_INIT === 'false') {
     return;
@@ -253,15 +316,24 @@ async function initMySQL() {
 }
 
 async function checkMySQL() {
-  await pool.query('SELECT 1');
+  await writerPool.query('SELECT 1');
+
+  if (getResolvedRole('reader') !== 'writer') {
+    await readerPool.query('SELECT 1');
+  }
 }
 
 async function closeMySQL() {
-  await pool.end();
+  const pools = Object.values(activePools).filter(Boolean);
+  const uniquePools = [...new Set(pools)];
+
+  await Promise.all(uniquePools.map((pool) => pool.end()));
 }
 
 module.exports = {
-  pool,
+  pool: writerPool,
+  writerPool,
+  readerPool,
   initMySQL,
   checkMySQL,
   closeMySQL,
