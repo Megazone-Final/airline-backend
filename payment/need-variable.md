@@ -33,7 +33,7 @@
 ### `VALKEY_URL`
 - 의미: 세션 저장소로 사용하는 Valkey 접속 주소입니다.
 - 예시: `rediss://valkey-user:password@host:6379`
-- 설명: 서비스는 로그인 세션을 Valkey에서 읽고 갱신합니다.
+- 설명: `auth` 서비스와 같은 세션 저장소 URL을 사용해야 로그인 세션을 공유할 수 있습니다.
 
 ### `SESSION_TTL_SECONDS`
 - 의미: 세션 만료 시간을 초 단위로 지정합니다.
