@@ -1,6 +1,5 @@
 const {
   getSession,
-  touchSession,
   SESSION_COOKIE_NAME,
 } = require('../services/sessions');
 
@@ -29,12 +28,11 @@ module.exports = async (req, res, next) => {
       return res.status(401).json({ message: '유효하지 않은 세션입니다' });
     }
 
-    const refreshedSession = await touchSession(token, session);
-    req.session = { token, ...refreshedSession };
+    req.session = { token, ...session };
     req.user = {
-      id: refreshedSession.userId,
-      email: refreshedSession.email,
-      name: refreshedSession.name,
+      id: session.userId,
+      email: session.email,
+      name: session.name,
     };
 
     next();
