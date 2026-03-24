@@ -5,9 +5,11 @@ const cookieParser = require('cookie-parser');
 const paymentsRoutes = require('./routes/payments');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
 const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
+const { createLogger } = require('./lib/logger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const logger = createLogger('payment');
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -43,22 +45,26 @@ app.get('/health', async (req, res) => {
 
 async function start() {
   await initMySQL();
-  console.log('MySQL connected');
+  logger.info('MySQL connected', {
+    event: 'mysql_connected',
+    category: 'database',
+  });
 
-  const valkeyReady = await initValkey();
-  if (valkeyReady) {
-    console.log('Valkey connected');
-  } else {
-    console.warn('Valkey unavailable, service started in degraded mode');
-  }
+  await initValkey();
 
   app.listen(PORT, () => {
-    console.log(`Payment service running on port ${PORT}`);
+    logger.info('Payment service started', {
+      event: 'service_started',
+      context: { port: Number(PORT) },
+    });
   });
 }
 
 async function shutdown(signal) {
-  console.log(`${signal} received, shutting down`);
+  logger.info('Shutdown signal received', {
+    event: 'shutdown_started',
+    context: { signal },
+  });
   await Promise.allSettled([closeMySQL(), closeValkey()]);
   process.exit(0);
 }
@@ -72,6 +78,10 @@ process.on('SIGTERM', () => {
 });
 
 start().catch((err) => {
-  console.error('Startup error:', err.stack || err.message || err);
+  logger.error('Payment service startup failed', {
+    event: 'startup_failed',
+    category: 'application',
+    error: err,
+  });
   process.exit(1);
 });

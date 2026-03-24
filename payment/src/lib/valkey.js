@@ -1,7 +1,9 @@
 const Redis = require('ioredis');
+const { createLogger } = require('./logger');
 
 const valkeyUrl = process.env.VALKEY_URL;
 let valkey = null;
+const logger = createLogger('payment');
 
 function buildRedisClient() {
   if (!valkeyUrl) {
@@ -21,10 +23,22 @@ function buildRedisClient() {
   const client = new Redis(valkeyUrl, redisOptions);
   client.on('error', (err) => {
     if (err.message.includes('NOAUTH') || err.message.includes('WRONGPASS')) {
-      console.warn('Valkey auth failed. Check VALKEY_URL credentials.');
+      logger.warn('Valkey authentication failed', {
+        event: 'valkey_auth_failed',
+        category: 'configuration',
+        reason: 'invalid_credentials',
+        context: { dependency: 'valkey' },
+        error: err,
+      });
       return;
     }
-    console.error('Valkey error:', err.message);
+    logger.warn('Valkey runtime error detected', {
+      event: 'valkey_runtime_error',
+      category: 'external_dependency',
+      reason: 'runtime_error',
+      context: { dependency: 'valkey' },
+      error: err,
+    });
   });
 
   return client;
@@ -41,7 +55,12 @@ function getValkeyClient() {
 async function initValkey() {
   const client = getValkeyClient();
   if (!client) {
-    console.warn('Valkey is not configured. Start in degraded mode.');
+    logger.warn('Valkey is not configured, payment service starts in degraded mode', {
+      event: 'valkey_unavailable',
+      category: 'configuration',
+      reason: 'missing_configuration',
+      context: { dependency: 'valkey' },
+    });
     return false;
   }
 
@@ -50,10 +69,20 @@ async function initValkey() {
       await client.connect();
     }
     await client.ping();
-    console.log('Valkey connected');
+    logger.info('Valkey connected', {
+      event: 'valkey_connected',
+      category: 'external_dependency',
+      context: { dependency: 'valkey' },
+    });
     return true;
   } catch (err) {
-    console.error('Valkey connection failed, continuing startup:', err.message);
+    logger.warn('Valkey connection failed, payment service continues in degraded mode', {
+      event: 'valkey_connection_failed',
+      category: 'external_dependency',
+      reason: 'connection_failed',
+      context: { dependency: 'valkey' },
+      error: err,
+    });
     return false;
   }
 }

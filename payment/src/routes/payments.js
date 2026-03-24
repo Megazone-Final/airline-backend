@@ -11,8 +11,10 @@ const {
   getFlightDetail,
   createReservation,
 } = require('../services/flights');
+const { createLogger } = require('../lib/logger');
 
 const router = express.Router();
+const logger = createLogger('payment');
 
 function validatePayment(body) {
   if (!body.flightId) {
@@ -51,11 +53,30 @@ router.post('/', auth, async (req, res) => {
   try {
     const validationMessage = validatePayment(req.body);
     if (validationMessage) {
+      logger.warn('Payment request validation failed', {
+        event: 'validation_failed',
+        category: 'user_input',
+        reason: 'invalid_payment_payload',
+        statusCode: 400,
+        context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+      });
       return res.status(400).json({ message: validationMessage });
     }
 
     const flight = await getFlightDetail(req.body.flightId);
     if (!flight) {
+      logger.warn('Flight not found for payment request', {
+        event: 'flight_not_found',
+        category: 'user_input',
+        reason: 'resource_not_found',
+        statusCode: 404,
+        context: {
+          method: req.method,
+          path: req.originalUrl,
+          flightId: req.body.flightId,
+          userId: req.user?.id,
+        },
+      });
       return res.status(404).json({ message: '항공편을 찾을 수 없습니다' });
     }
 
@@ -89,17 +110,37 @@ router.post('/', auth, async (req, res) => {
       try {
         await failPayment(pendingPayment.id, req.user.id);
       } catch (paymentUpdateErr) {
-        console.error(
-          'Payment failure status update failed:',
-          paymentUpdateErr.stack || paymentUpdateErr.message || paymentUpdateErr
-        );
+        logger.error('Failed to update payment status after reservation failure', {
+          event: 'payment_status_update_failed',
+          category: 'data_integrity',
+          reason: 'rollback_failed',
+          statusCode: 500,
+          context: { paymentId: pendingPayment.id, userId: req.user?.id },
+          error: paymentUpdateErr,
+        });
       }
     }
 
     if (err.statusCode) {
+      logger.warn('Payment request rejected', {
+        event: 'payment_request_rejected',
+        category: 'external_dependency',
+        reason: 'reservation_or_payment_rejected',
+        statusCode: err.statusCode,
+        context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+        error: err,
+      });
       return res.status(err.statusCode).json({ message: err.message });
     }
 
+    logger.error('Payment creation failed unexpectedly', {
+      event: 'payment_creation_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+      error: err,
+    });
     return res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
 });
@@ -109,6 +150,14 @@ router.get('/', auth, async (req, res) => {
     const payments = await listPaymentsByUser(req.user.id);
     return res.json(payments);
   } catch (err) {
+    logger.error('Payment list lookup failed', {
+      event: 'payment_list_lookup_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+      error: err,
+    });
     return res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
 });
@@ -117,11 +166,36 @@ router.get('/:id', auth, async (req, res) => {
   try {
     const payment = await findPaymentByIdForUser(req.params.id, req.user.id);
     if (!payment) {
+      logger.warn('Payment record not found', {
+        event: 'payment_not_found',
+        category: 'user_input',
+        reason: 'resource_not_found',
+        statusCode: 404,
+        context: {
+          method: req.method,
+          path: req.originalUrl,
+          paymentId: req.params.id,
+          userId: req.user?.id,
+        },
+      });
       return res.status(404).json({ message: '결제 내역을 찾을 수 없습니다' });
     }
 
     return res.json(payment);
   } catch (err) {
+    logger.error('Payment detail lookup failed', {
+      event: 'payment_detail_lookup_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: {
+        method: req.method,
+        path: req.originalUrl,
+        paymentId: req.params.id,
+        userId: req.user?.id,
+      },
+      error: err,
+    });
     return res.status(500).json({ message: '서버 오류가 발생했습니다' });
   }
 });

@@ -6,9 +6,11 @@ const cookieParser = require('cookie-parser');
 const flightsRoutes = require('./routes/flights');
 const { router: reservationsRoutes, internalRouter } = require('./routes/reservations');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
+const { createLogger } = require('./lib/logger');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
+const logger = createLogger('flight');
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -44,15 +46,24 @@ app.get('/health', async (req, res) => {
 
 async function start() {
   await initMySQL();
-  console.log('MySQL connected');
+  logger.info('MySQL connected', {
+    event: 'mysql_connected',
+    category: 'database',
+  });
 
   app.listen(PORT, () => {
-    console.log(`Flight service running on port ${PORT}`);
+    logger.info('Flight service started', {
+      event: 'service_started',
+      context: { port: Number(PORT) },
+    });
   });
 }
 
 async function shutdown(signal) {
-  console.log(`${signal} received, shutting down`);
+  logger.info('Shutdown signal received', {
+    event: 'shutdown_started',
+    context: { signal },
+  });
   await closeMySQL();
   process.exit(0);
 }
@@ -66,6 +77,10 @@ process.on('SIGTERM', () => {
 });
 
 start().catch((err) => {
-  console.error('Startup error:', err.stack || err.message || err);
+  logger.error('Flight service startup failed', {
+    event: 'startup_failed',
+    category: 'application',
+    error: err,
+  });
   process.exit(1);
 });

@@ -1,4 +1,5 @@
 const Redis = require('ioredis');
+const { createLogger } = require('./logger');
 
 function parseBoolean(value) {
   if (value == null) return undefined;
@@ -11,6 +12,7 @@ const tlsEnabled = parseBoolean(process.env.VALKEY_TLS) ?? false;
 const userId = process.env.VALKEY_USER;
 const clusterName = process.env.VALKEY_CLUSTER_NAME;
 const region = process.env.AWS_REGION || 'ap-northeast-2';
+const logger = createLogger('auth');
 
 function getLegacyHost() {
   return process.env.VALKEY_HOST;
@@ -113,7 +115,13 @@ async function createClient() {
   }
 
   valkey.on('error', (err) => {
-    console.error('Valkey error:', err.message);
+    logger.warn('Valkey runtime error detected', {
+      event: 'valkey_runtime_error',
+      category: 'external_dependency',
+      reason: 'runtime_error',
+      context: { dependency: 'valkey' },
+      error: err,
+    });
   });
 
   return valkey;
@@ -128,7 +136,12 @@ async function initValkey() {
     const client = await createClient();
 
     if (!client) {
-      console.warn('Valkey is not configured. Auth service starts in degraded mode.');
+      logger.warn('Valkey is not configured, auth service started in degraded mode', {
+        event: 'valkey_unavailable',
+        category: 'configuration',
+        reason: 'missing_configuration',
+        context: { dependency: 'valkey' },
+      });
       return false;
     }
 
@@ -137,7 +150,11 @@ async function initValkey() {
     }
 
     await client.ping();
-    console.log('Valkey connected');
+    logger.info('Valkey connected', {
+      event: 'valkey_connected',
+      category: 'external_dependency',
+      context: { dependency: 'valkey' },
+    });
 
     if (useIamAuth) {
       setInterval(async () => {
@@ -145,14 +162,26 @@ async function initValkey() {
           const newToken = await getIamToken();
           client.options.password = newToken;
         } catch (err) {
-          console.error('Failed to refresh Valkey IAM token:', err.message);
+          logger.warn('Failed to refresh Valkey IAM token', {
+            event: 'valkey_iam_token_refresh_failed',
+            category: 'external_dependency',
+            reason: 'token_refresh_failed',
+            context: { dependency: 'valkey' },
+            error: err,
+          });
         }
       }, 10 * 60 * 1000).unref();
     }
 
     return true;
   } catch (err) {
-    console.error('Valkey connection failed, continuing startup:', err.message);
+    logger.warn('Valkey connection failed, auth service continues in degraded mode', {
+      event: 'valkey_connection_failed',
+      category: 'external_dependency',
+      reason: 'connection_failed',
+      context: { dependency: 'valkey' },
+      error: err,
+    });
     return false;
   }
 }
