@@ -5,9 +5,11 @@ const cookieParser = require('cookie-parser');
 const userRoutes = require('./routes/users');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
 const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
+const { createLogger } = require('./lib/logger');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const logger = createLogger('auth');
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -45,18 +47,26 @@ app.get('/health', async (req, res) => {
 
 async function start() {
   await initMySQL();
-  console.log('MySQL connected');
+  logger.info('MySQL connected', {
+    event: 'mysql_connected',
+    category: 'database',
+  });
 
   await initValkey();
-  console.log('Valkey connected');
 
   app.listen(PORT, () => {
-    console.log(`Auth service running on port ${PORT}`);
+    logger.info('Auth service started', {
+      event: 'service_started',
+      context: { port: Number(PORT) },
+    });
   });
 }
 
 async function shutdown(signal) {
-  console.log(`${signal} received, shutting down`);
+  logger.info('Shutdown signal received', {
+    event: 'shutdown_started',
+    context: { signal },
+  });
   await Promise.allSettled([closeMySQL(), closeValkey()]);
   process.exit(0);
 }
@@ -70,6 +80,10 @@ process.on('SIGTERM', () => {
 });
 
 start().catch((err) => {
-  console.error('Startup error:', err.stack || err.message || err);
+  logger.error('Auth service startup failed', {
+    event: 'startup_failed',
+    category: 'application',
+    error: err,
+  });
   process.exit(1);
 });

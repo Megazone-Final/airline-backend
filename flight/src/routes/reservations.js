@@ -5,9 +5,11 @@ const {
   findReservationByIdForUser,
   createReservation,
 } = require('../repositories/reservations');
+const { createLogger } = require('../lib/logger');
 
 const router = express.Router();
 const internalRouter = express.Router();
+const logger = createLogger('flight');
 
 function validateReservationPayload(body) {
   if (!body.userId) {
@@ -49,6 +51,14 @@ router.get('/', async (req, res) => {
     const reservations = await listReservationsByUser(1);
     res.json(reservations);
   } catch (err) {
+    logger.error('Reservation list lookup failed', {
+      event: 'reservation_list_lookup_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl },
+      error: err,
+    });
     res.status(500).json({ message: '내부 오류가 발생했습니다.' });
   }
 });
@@ -57,11 +67,26 @@ router.get('/:id', async (req, res) => {
   try {
     const reservation = await findReservationByIdForUser(req.params.id, 1);
     if (!reservation) {
+      logger.warn('Reservation not found', {
+        event: 'reservation_not_found',
+        category: 'user_input',
+        reason: 'resource_not_found',
+        statusCode: 404,
+        context: { method: req.method, path: req.originalUrl, reservationId: req.params.id },
+      });
       return res.status(404).json({ message: '예약 정보를 찾을 수 없습니다.' });
     }
 
     return res.json(reservation);
   } catch (err) {
+    logger.error('Reservation detail lookup failed', {
+      event: 'reservation_detail_lookup_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl, reservationId: req.params.id },
+      error: err,
+    });
     return res.status(500).json({ message: '내부 오류가 발생했습니다.' });
   }
 });
@@ -70,6 +95,13 @@ internalRouter.post('/reservations', internal, async (req, res) => {
   try {
     const validationMessage = validateReservationPayload(req.body);
     if (validationMessage) {
+      logger.warn('Reservation payload validation failed', {
+        event: 'validation_failed',
+        category: 'user_input',
+        reason: 'invalid_reservation_payload',
+        statusCode: 400,
+        context: { method: req.method, path: req.originalUrl },
+      });
       return res.status(400).json({ message: validationMessage });
     }
 
@@ -85,9 +117,25 @@ internalRouter.post('/reservations', internal, async (req, res) => {
     return res.status(201).json(reservation);
   } catch (err) {
     if (err.statusCode) {
+      logger.warn('Reservation creation request rejected', {
+        event: 'reservation_creation_rejected',
+        category: 'user_input',
+        reason: 'business_validation_failed',
+        statusCode: err.statusCode,
+        context: { method: req.method, path: req.originalUrl },
+        error: err,
+      });
       return res.status(err.statusCode).json({ message: err.message });
     }
 
+    logger.error('Reservation creation failed unexpectedly', {
+      event: 'reservation_creation_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl },
+      error: err,
+    });
     return res.status(500).json({ message: '내부 오류가 발생했습니다.' });
   }
 });

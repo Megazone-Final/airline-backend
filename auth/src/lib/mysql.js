@@ -1,9 +1,11 @@
 const fs = require('node:fs');
 const mysql = require('mysql2/promise');
 const { Signer } = require('@aws-sdk/rds-signer');
+const { createLogger } = require('./logger');
 
 const DEFAULT_DB_HOST =
   'rds-airline-mysql-main.cluster-cb8q4mm6485z.ap-northeast-2.rds.amazonaws.com';
+const logger = createLogger('auth');
 
 function parseBoolean(value) {
   if (value == null) {
@@ -147,7 +149,13 @@ async function initPool(role = 'writer') {
         currentPasswords[resolvedRole] = newToken;
         pool.pool.config.connectionConfig.password = newToken;
       } catch (err) {
-        console.error(`Failed to refresh RDS IAM token for ${resolvedRole}:`, err);
+        logger.warn('Failed to refresh RDS IAM token', {
+          event: 'rds_iam_token_refresh_failed',
+          category: 'external_dependency',
+          reason: 'token_refresh_failed',
+          context: { role: resolvedRole },
+          error: err,
+        });
       }
     }, 10 * 60 * 1000).unref();
 

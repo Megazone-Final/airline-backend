@@ -1,6 +1,9 @@
 const fs = require('node:fs');
 const mysql = require('mysql2/promise');
 const { Signer } = require('@aws-sdk/rds-signer');
+const { createLogger } = require('./logger');
+
+const logger = createLogger('payment');
 
 function parseBoolean(value) {
   if (value == null) {
@@ -127,9 +130,14 @@ async function initMySQL() {
   try {
     const connection = await getConnection('writer');
 
-    console.log(
-      `✅ RDS IAM 인증 성공 (${getDbHost('writer')}, user: ${getBaseConfig().username})`
-    );
+    logger.info('RDS IAM authentication succeeded', {
+      event: 'rds_iam_authenticated',
+      category: 'database',
+      context: {
+        host: getDbHost('writer'),
+        user: getBaseConfig().username,
+      },
+    });
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS payments (
@@ -152,10 +160,17 @@ async function initMySQL() {
       MODIFY COLUMN reservation_id VARCHAR(32) NULL
     `);
 
-    console.log('✅ payments 테이블 확인 완료');
+    logger.info('Payments table is ready', {
+      event: 'payments_table_ready',
+      category: 'database',
+    });
     await connection.end();
   } catch (err) {
-    console.error('❌ DB 초기화 실패:', err.message);
+    logger.error('Payment database initialization failed', {
+      event: 'database_init_failed',
+      category: 'database',
+      error: err,
+    });
     throw err;
   }
 }
