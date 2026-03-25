@@ -1,3 +1,4 @@
+## payment 서비스 버전을 증가시키고 ECR에 이미지를 배포하는 워크플로우
 name: Payment Service - Build & Push to ECR
 
 on:
@@ -9,15 +10,59 @@ on:
 
 permissions:
     id-token: write
-    contents: read
+    contents: write
 
 jobs:
     build-and-push:
         runs-on: ubuntu-latest
         steps:
+            # 저장소 코드와 태그 이력을 모두 가져옵니다.
             - name: Checkout code
               uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
+            # 현재 payment 태그 기준으로 다음 버전을 계산합니다.
+            - name: Determine next version
+              id: version
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  prefix="payment-v"
+                  latest_tag="$(git tag -l "${prefix}*" --sort=-version:refname | head -n 1)"
+
+                  if [ -z "$latest_tag" ]; then
+                    next_tag="${prefix}1.0.0"
+                  else
+                    version="${latest_tag#${prefix}}"
+                    IFS='.' read -r major minor patch <<< "$version"
+
+                    if [ "$patch" -lt 9 ]; then
+                      patch=$((patch + 1))
+                    else
+                      minor=$((minor + 1))
+                      patch=0
+                    fi
+
+                    next_tag="${prefix}${major}.${minor}.${patch}"
+                  fi
+
+                  echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
+                  echo "next_tag=${next_tag}" >> "$GITHUB_OUTPUT"
+                  echo "image_tag=${next_tag#${prefix}}" >> "$GITHUB_OUTPUT"
+
+            # 계산된 버전으로 Git 태그를 생성하고 원격에 푸시합니다.
+            - name: Create git tag
+              env:
+                  NEXT_TAG: ${{ steps.version.outputs.next_tag }}
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git tag "$NEXT_TAG"
+                  git push origin "$NEXT_TAG"
+
+            # ECR 푸시를 위한 AWS 자격 증명을 설정합니다.
             - name: Configure AWS credentials
               uses: aws-actions/configure-aws-credentials@v4
               with:
@@ -25,16 +70,19 @@ jobs:
                   role-session-name: github-actions-payments
                   aws-region: ap-northeast-2
 
+            # 대상 AWS 계정의 ECR에 로그인합니다.
             - name: Login to Amazon ECR
               id: ecr-login
               uses: aws-actions/amazon-ecr-login@v2
 
+            # 계산된 버전 태그로 이미지를 빌드하고 ECR에 푸시합니다.
             - name: Build & Push Docker image
               env:
                   REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-                  REPOSITORY: airline-backend/payments
-                  IMAGE_TAG: ${{ github.sha }}
+                  REPOSITORY: airline-payment
+                  IMAGE_TAG: ${{ steps.version.outputs.image_tag }}
               run: |
-                  docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest ./payment
+                  docker build \
+                    -t $REGISTRY/$REPOSITORY:$IMAGE_TAG \
+                    ./payment
                   docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-                  docker push $REGISTRY/$REPOSITORY:latest
