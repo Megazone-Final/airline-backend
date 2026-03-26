@@ -81,7 +81,7 @@ jobs:
             - name: Build & Push Docker image
               env:
                   REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-                  REPOSITORY: airline-auth
+                  REPOSITORY: airline-backend/auth
                   IMAGE_TAG: ${{ steps.version.outputs.image_tag }}
               run: |
                   docker build \
