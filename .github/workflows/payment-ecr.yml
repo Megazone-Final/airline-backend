@@ -2,11 +2,13 @@
 name: Payment Service - Build & Push to ECR
 
 on:
+    workflow_dispatch:
     push:
         branches:
             - main
         paths:
             - "payment/**"
+            - ".github/workflows/payment-ecr.yml"
 
 permissions:
     id-token: write

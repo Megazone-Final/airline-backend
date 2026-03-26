@@ -2,11 +2,13 @@
 name: Flight Service - Build & Push to ECR
 
 on:
+    workflow_dispatch:
     push:
         branches:
             - main
         paths:
             - "flight/**"
+            - ".github/workflows/flight-ecr.yml"
 
 permissions:
     id-token: write
