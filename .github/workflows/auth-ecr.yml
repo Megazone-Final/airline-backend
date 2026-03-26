@@ -2,11 +2,13 @@
 name: Auth Service - Build & Push to ECR
 
 on:
+    workflow_dispatch:
     push:
         branches:
             - main
         paths:
             - "auth/**"
+            - ".github/workflows/auth-ecr.yml"
 
 permissions:
     id-token: write
