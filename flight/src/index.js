@@ -29,19 +29,39 @@ app.use('/api/flight/reservations', reservationsRoutes);
 app.use('/api/flight', flightsRoutes);
 app.use('/internal', internalRouter);
 
-app.get('/health', async (req, res) => {
+app.get('/livez', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'flights',
+  });
+});
+
+async function buildReadinessStatus() {
   const mysqlOk = await checkMySQL()
     .then(() => true)
     .catch(() => false);
   const status = mysqlOk ? 'ok' : 'degraded';
 
-  res.status(status === 'ok' ? 200 : 503).json({
-    status,
-    service: 'flights',
-    dependencies: {
-      mysql: mysqlOk ? 'ok' : 'error',
+  return {
+    statusCode: status === 'ok' ? 200 : 503,
+    body: {
+      status,
+      service: 'flights',
+      dependencies: {
+        mysql: mysqlOk ? 'ok' : 'error',
+      },
     },
-  });
+  };
+}
+
+app.get('/readyz', async (req, res) => {
+  const { statusCode, body } = await buildReadinessStatus();
+  res.status(statusCode).json(body);
+});
+
+app.get('/health', async (req, res) => {
+  const { statusCode, body } = await buildReadinessStatus();
+  res.status(statusCode).json(body);
 });
 
 async function start() {
