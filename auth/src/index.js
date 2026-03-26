@@ -28,21 +28,40 @@ app.use(express.json());
 // Routes
 app.use('/api/auth/users', userRoutes);
 
-// Health check
-app.get('/health', async (req, res) => {
+app.get('/livez', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'auth',
+  });
+});
+
+async function buildReadinessStatus() {
   const checks = await Promise.allSettled([checkMySQL(), checkValkey()]);
   const mysqlOk = checks[0].status === 'fulfilled';
   const valkeyOk = checks[1].status === 'fulfilled';
   const status = mysqlOk && valkeyOk ? 'ok' : 'degraded';
 
-  res.status(status === 'ok' ? 200 : 503).json({
-    status,
-    service: 'auth',
-    dependencies: {
-      mysql: mysqlOk ? 'ok' : 'error',
-      valkey: valkeyOk ? 'ok' : 'error',
+  return {
+    statusCode: status === 'ok' ? 200 : 503,
+    body: {
+      status,
+      service: 'auth',
+      dependencies: {
+        mysql: mysqlOk ? 'ok' : 'error',
+        valkey: valkeyOk ? 'ok' : 'error',
+      },
     },
-  });
+  };
+}
+
+app.get('/readyz', async (req, res) => {
+  const { statusCode, body } = await buildReadinessStatus();
+  res.status(statusCode).json(body);
+});
+
+app.get('/health', async (req, res) => {
+  const { statusCode, body } = await buildReadinessStatus();
+  res.status(statusCode).json(body);
 });
 
 async function start() {

@@ -27,20 +27,40 @@ app.use(express.json());
 
 app.use('/api/payment', paymentsRoutes);
 
-app.get('/health', async (req, res) => {
+app.get('/livez', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'payments',
+  });
+});
+
+async function buildReadinessStatus() {
   const checks = await Promise.allSettled([checkMySQL(), checkValkey()]);
   const mysqlOk = checks[0].status === 'fulfilled' && checks[0].value === true;
   const valkeyOk = checks[1].status === 'fulfilled' && checks[1].value === true;
   const status = mysqlOk && valkeyOk ? 'ok' : 'degraded';
 
-  res.status(status === 'ok' ? 200 : 503).json({
-    status,
-    service: 'payments',
-    dependencies: {
-      mysql: mysqlOk ? 'ok' : 'error',
-      valkey: valkeyOk ? 'ok' : 'error',
+  return {
+    statusCode: status === 'ok' ? 200 : 503,
+    body: {
+      status,
+      service: 'payments',
+      dependencies: {
+        mysql: mysqlOk ? 'ok' : 'error',
+        valkey: valkeyOk ? 'ok' : 'error',
+      },
     },
-  });
+  };
+}
+
+app.get('/readyz', async (req, res) => {
+  const { statusCode, body } = await buildReadinessStatus();
+  res.status(statusCode).json(body);
+});
+
+app.get('/health', async (req, res) => {
+  const { statusCode, body } = await buildReadinessStatus();
+  res.status(statusCode).json(body);
 });
 
 async function start() {
