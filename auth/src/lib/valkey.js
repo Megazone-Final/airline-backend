@@ -1,4 +1,8 @@
 const Redis = require('ioredis');
+const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+const { defaultProvider } = require('@aws-sdk/credential-provider-node');
+const { SignatureV4 } = require('@smithy/signature-v4');
+const { Hash } = require('@smithy/hash-node');
 const { createLogger } = require('./logger');
 
 function parseBoolean(value) {
@@ -6,13 +10,31 @@ function parseBoolean(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 }
 
-const valkeyUrl = process.env.VALKEY_URL;
-const useIamAuth = parseBoolean(process.env.VALKEY_USE_IAM_AUTH) ?? false;
-const tlsEnabled = parseBoolean(process.env.VALKEY_TLS) ?? false;
-const userId = process.env.VALKEY_USER;
-const clusterName = process.env.VALKEY_CLUSTER_NAME;
-const region = process.env.AWS_REGION || 'ap-northeast-2';
 const logger = createLogger('auth');
+const region = process.env.AWS_REGION || 'ap-northeast-2';
+const secretsManager = new SecretsManagerClient({ region });
+
+let valkey = null;
+let resolvedConnection = null;
+let cachedSecretEndpoint;
+let secretEndpointLoaded = false;
+
+function getValkeyUser() {
+  return process.env.VALKEY_USER;
+}
+
+function getValkeyEndpointSecretId() {
+  return (
+    process.env.VALKEY_ENDPOINT_SECRET_ID ||
+    process.env.VALKEY_ENDPOINT_SECRET_ARN ||
+    process.env.VALKEY_SECRET_ID ||
+    process.env.VALKEY_SECRET_ARN
+  );
+}
+
+function getExplicitEndpoint() {
+  return process.env.VALKEY_ENDPOINT || process.env.VALKEY_URL;
+}
 
 function getLegacyHost() {
   return process.env.VALKEY_HOST;
@@ -20,6 +42,10 @@ function getLegacyHost() {
 
 function getLegacyPort() {
   return parseInt(process.env.VALKEY_PORT || '6379', 10);
+}
+
+function useIamAuth() {
+  return parseBoolean(process.env.VALKEY_USE_IAM_AUTH) ?? false;
 }
 
 function createRetryOptions() {
@@ -33,14 +59,155 @@ function createRetryOptions() {
   };
 }
 
-async function getIamToken() {
-  if (!clusterName || !userId) {
-    throw new Error('VALKEY IAM auth requires VALKEY_CLUSTER_NAME and VALKEY_USER');
+function tryParseSecretJson(rawValue) {
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeEndpointValue(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) {
+    return null;
   }
 
-  const { SignatureV4 } = require('@smithy/signature-v4');
-  const { Hash } = require('@smithy/hash-node');
-  const { defaultProvider } = require('@aws-sdk/credential-provider-node');
+  const parsed = value.startsWith('{') ? tryParseSecretJson(value) : null;
+  if (!parsed) {
+    return value;
+  }
+
+  const directValue =
+    parsed.endpoint ||
+    parsed.url ||
+    parsed.value ||
+    parsed.VALKEY_ENDPOINT ||
+    parsed.VALKEY_URL;
+  if (typeof directValue === 'string' && directValue.trim()) {
+    return directValue.trim();
+  }
+
+  const host = parsed.host || parsed.address || parsed.hostname || parsed.VALKEY_HOST;
+  const port = parsed.port || parsed.VALKEY_PORT || 6379;
+  if (typeof host === 'string' && host.trim()) {
+    return `${host.trim()}:${port}`;
+  }
+
+  return null;
+}
+
+function parseEndpoint(endpointValue) {
+  if (!endpointValue) {
+    return null;
+  }
+
+  const normalized = String(endpointValue).trim();
+  const url =
+    normalized.includes('://') ? new URL(normalized) : new URL(`rediss://${normalized}`);
+
+  return {
+    host: url.hostname,
+    port: Number(url.port || 6379),
+    tlsFromEndpoint: url.protocol === 'rediss:',
+  };
+}
+
+function resolveTlsEnabled(connection) {
+  const configured = parseBoolean(process.env.VALKEY_TLS);
+  if (configured !== undefined) {
+    return configured;
+  }
+
+  return connection.tlsFromEndpoint || useIamAuth();
+}
+
+function resolveCacheName(host) {
+  const explicit = process.env.VALKEY_CACHE_NAME || process.env.VALKEY_CLUSTER_NAME;
+  if (explicit) {
+    return explicit.trim().toLowerCase();
+  }
+
+  const segments = String(host || '')
+    .trim()
+    .toLowerCase()
+    .split('.')
+    .filter(Boolean);
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  if ((segments[0] === 'master' || segments[0] === 'replica') && segments.length > 1) {
+    return segments[1];
+  }
+
+  return segments[0];
+}
+
+async function fetchEndpointFromSecret() {
+  if (secretEndpointLoaded) {
+    return cachedSecretEndpoint;
+  }
+
+  secretEndpointLoaded = true;
+  const secretId = getValkeyEndpointSecretId();
+  if (!secretId) {
+    cachedSecretEndpoint = null;
+    return cachedSecretEndpoint;
+  }
+
+  const response = await secretsManager.send(new GetSecretValueCommand({ SecretId: secretId }));
+  const secretString = response.SecretString
+    || (response.SecretBinary ? Buffer.from(response.SecretBinary, 'base64').toString('utf8') : '');
+
+  cachedSecretEndpoint = normalizeEndpointValue(secretString);
+  return cachedSecretEndpoint;
+}
+
+async function resolveConnectionConfig() {
+  if (resolvedConnection) {
+    return resolvedConnection;
+  }
+
+  const endpointValue = (await fetchEndpointFromSecret()) || getExplicitEndpoint();
+  const parsedEndpoint = parseEndpoint(endpointValue);
+  if (parsedEndpoint) {
+    resolvedConnection = {
+      host: parsedEndpoint.host,
+      port: parsedEndpoint.port,
+      tls: resolveTlsEnabled(parsedEndpoint),
+      cacheName: resolveCacheName(parsedEndpoint.host),
+    };
+    return resolvedConnection;
+  }
+
+  const host = getLegacyHost();
+  if (!host) {
+    return null;
+  }
+
+  resolvedConnection = {
+    host,
+    port: getLegacyPort(),
+    tls: resolveTlsEnabled({ tlsFromEndpoint: false }),
+    cacheName: resolveCacheName(host),
+  };
+
+  return resolvedConnection;
+}
+
+async function getIamToken(connection) {
+  const userId = getValkeyUser();
+  if (!userId) {
+    throw new Error('VALKEY IAM auth requires VALKEY_USER');
+  }
+
+  if (!connection?.cacheName) {
+    throw new Error(
+      'VALKEY IAM auth requires a cache name. Set VALKEY_CACHE_NAME or provide a parsable endpoint.'
+    );
+  }
 
   const signer = new SignatureV4({
     credentials: defaultProvider(),
@@ -53,68 +220,35 @@ async function getIamToken() {
     {
       method: 'GET',
       protocol: 'http:',
-      hostname: clusterName,
+      hostname: connection.cacheName,
       path: '/',
       query: {
         Action: 'connect',
         User: userId,
       },
-      headers: { host: clusterName },
+      headers: { host: connection.cacheName },
     },
-    { expiresIn: 900 },
+    { expiresIn: 900 }
   );
 
   const qs = Object.entries(signed.query || {})
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join('&');
 
   return `${signed.hostname}${signed.path}?${qs}`;
 }
 
-function buildUrlClient() {
-  if (!valkeyUrl) {
-    return null;
-  }
-
-  return new Redis(valkeyUrl, {
-    ...createRetryOptions(),
-    tls: valkeyUrl.startsWith('rediss://')
-      ? { checkServerIdentity: () => undefined }
-      : undefined,
-  });
-}
-
-function buildHostClient(password) {
-  const host = getLegacyHost();
-  if (!host) {
-    return null;
-  }
-
-  return new Redis({
-    host,
-    port: getLegacyPort(),
-    username: useIamAuth ? userId : undefined,
+function createRedisClient(connection, password) {
+  const client = new Redis({
+    host: connection.host,
+    port: connection.port,
+    username: useIamAuth() ? getValkeyUser() : undefined,
     password: password || undefined,
-    tls: tlsEnabled ? { checkServerIdentity: () => undefined } : undefined,
+    tls: connection.tls ? { checkServerIdentity: () => undefined } : undefined,
     ...createRetryOptions(),
   });
-}
 
-let valkey = null;
-
-async function createClient() {
-  if (valkeyUrl) {
-    valkey = buildUrlClient();
-  } else {
-    const password = useIamAuth ? await getIamToken() : undefined;
-    valkey = buildHostClient(password);
-  }
-
-  if (!valkey) {
-    return null;
-  }
-
-  valkey.on('error', (err) => {
+  client.on('error', (err) => {
     logger.warn('Valkey runtime error detected', {
       event: 'valkey_runtime_error',
       category: 'external_dependency',
@@ -124,6 +258,17 @@ async function createClient() {
     });
   });
 
+  return client;
+}
+
+async function createClient() {
+  const connection = await resolveConnectionConfig();
+  if (!connection) {
+    return null;
+  }
+
+  const password = useIamAuth() ? await getIamToken(connection) : undefined;
+  valkey = createRedisClient(connection, password);
   return valkey;
 }
 
@@ -156,10 +301,11 @@ async function initValkey() {
       context: { dependency: 'valkey' },
     });
 
-    if (useIamAuth) {
+    if (useIamAuth()) {
       setInterval(async () => {
         try {
-          const newToken = await getIamToken();
+          const connection = await resolveConnectionConfig();
+          const newToken = await getIamToken(connection);
           client.options.password = newToken;
         } catch (err) {
           logger.warn('Failed to refresh Valkey IAM token', {
