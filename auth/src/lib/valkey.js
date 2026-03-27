@@ -32,6 +32,19 @@ function getValkeyEndpointSecretId() {
   );
 }
 
+function looksLikeEndpointValue(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized.startsWith('redis://') || normalized.startsWith('rediss://')) {
+    return true;
+  }
+
+  return normalized.includes('.cache.amazonaws.com');
+}
+
 function getExplicitEndpoint() {
   return process.env.VALKEY_ENDPOINT || process.env.VALKEY_URL;
 }
@@ -154,6 +167,11 @@ async function fetchEndpointFromSecret() {
   const secretId = getValkeyEndpointSecretId();
   if (!secretId) {
     cachedSecretEndpoint = null;
+    return cachedSecretEndpoint;
+  }
+
+  if (looksLikeEndpointValue(secretId)) {
+    cachedSecretEndpoint = normalizeEndpointValue(secretId);
     return cachedSecretEndpoint;
   }
 
