@@ -124,6 +124,11 @@ npm run dev
 - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
 - `DB_AUTO_INIT`
 - `VALKEY_URL`
+- `VALKEY_ENDPOINT_SECRET_ID` or `VALKEY_ENDPOINT_SECRET_ARN`
+- `VALKEY_USER`
+- `VALKEY_USE_IAM_AUTH`
+- `VALKEY_TLS`
+- `VALKEY_CACHE_NAME` or `VALKEY_CLUSTER_NAME` (optional override when endpoint parsing is not enough)
 
 ### flight
 
