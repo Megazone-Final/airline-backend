@@ -12,7 +12,16 @@ function parseBoolean(value) {
 
 const logger = createLogger('auth');
 const region = process.env.AWS_REGION || 'ap-northeast-2';
-const secretsManager = new SecretsManagerClient({ region });
+const awsCredentialTimeoutMs = Number(process.env.AWS_CREDENTIALS_TIMEOUT_MS || 5000);
+const awsCredentialRetries = Number(process.env.AWS_CREDENTIALS_MAX_RETRIES || 2);
+const awsCredentials = defaultProvider({
+  timeout: awsCredentialTimeoutMs,
+  maxRetries: awsCredentialRetries,
+});
+const secretsManager = new SecretsManagerClient({
+  region,
+  credentials: awsCredentials,
+});
 
 let valkey = null;
 let resolvedConnection = null;
@@ -228,7 +237,7 @@ async function getIamToken(connection) {
   }
 
   const signer = new SignatureV4({
-    credentials: defaultProvider(),
+    credentials: awsCredentials,
     region,
     service: 'elasticache',
     sha256: Hash.bind(null, 'sha256'),
