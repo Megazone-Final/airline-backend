@@ -87,7 +87,7 @@ jobs:
           | # 이미지 태그를 버전관리용으로 버전 태그를 사용하고 배포용으로 latest 태그를 사용합니다.
           docker build \
             -t $REGISTRY/$REPOSITORY:$IMAGE_TAG \
-            -t $REGISTRY/$REPOSITORY:latest \ #
+            -t $REGISTRY/$REPOSITORY:latest \
             ./payment
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
           docker push $REGISTRY/$REPOSITORY:latest
