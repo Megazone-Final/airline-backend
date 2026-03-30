@@ -90,4 +90,4 @@ jobs:
             -t $REGISTRY/$REPOSITORY:latest \
             ./auth
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-          docker push $REGISTRY/$REPOSITORY:latests
+          docker push $REGISTRY/$REPOSITORY:latest
