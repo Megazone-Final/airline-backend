@@ -54,16 +54,6 @@ jobs:
           echo "next_tag=${next_tag}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${next_tag#${prefix}}" >> "$GITHUB_OUTPUT"
 
-      # 계산된 버전으로 Git 태그를 생성하고 원격에 푸시합니다.
-      - name: Create git tag
-        env:
-          NEXT_TAG: ${{ steps.version.outputs.next_tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "$NEXT_TAG"
-          git push origin "$NEXT_TAG"
-
       # ECR 푸시를 위한 AWS 자격 증명을 설정합니다.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -91,3 +81,13 @@ jobs:
             ./flight
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
           docker push $REGISTRY/$REPOSITORY:latest
+
+      # 이미지 푸시가 끝난 뒤 버전 태그를 생성해 ECR 상태와 Git 태그를 맞춥니다.
+      - name: Create git tag
+        env:
+          NEXT_TAG: ${{ steps.version.outputs.next_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$NEXT_TAG"
+          git push origin "$NEXT_TAG"
