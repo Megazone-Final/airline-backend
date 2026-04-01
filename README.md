@@ -188,9 +188,8 @@ ECR 이미지 빌드/푸시용 GitHub Actions:
 
 현재 확인된 주의사항:
 
-- `flight`와 `payment` 워크플로는 각각 `flights/**`, `payments/**` 경로를 감시합니다.
-- 실제 디렉터리 이름은 `flight/`, `payment/`입니다.
-- 워크플로 트리거를 신뢰하기 전 경로 필터를 먼저 점검해야 합니다.
+- 각 워크플로는 해당 서비스 디렉터리(`auth/`, `flight/`, `payment/`) 변경 시 동작합니다.
+- 버전 Git 태그는 Docker 이미지가 ECR에 정상 푸시된 뒤 생성됩니다.
 
 ## 역할 경계
 
