@@ -12,6 +12,10 @@ spec:
     metadata:
       labels:
         app: airline-payment
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: payments-sa
       containers:

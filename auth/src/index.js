@@ -6,10 +6,12 @@ const userRoutes = require('./routes/users');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
 const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
 const { createLogger } = require('./lib/logger');
+const { createMetrics } = require('./lib/metrics');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 const logger = createLogger('auth');
+const metrics = createMetrics('auth');
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -24,6 +26,8 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json());
+app.use(metrics.middleware);
+app.get('/metrics', metrics.handler);
 
 // Routes
 app.use('/api/auth/users', userRoutes);

@@ -7,10 +7,12 @@ const flightsRoutes = require('./routes/flights');
 const { router: reservationsRoutes, internalRouter } = require('./routes/reservations');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
 const { createLogger } = require('./lib/logger');
+const { createMetrics } = require('./lib/metrics');
 
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3000;
 const logger = createLogger('flight');
+const metrics = createMetrics('flight');
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -24,6 +26,8 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json());
+app.use(metrics.middleware);
+app.get('/metrics', metrics.handler);
 
 app.use('/api/flight/reservations', reservationsRoutes);
 app.use('/api/flight', flightsRoutes);

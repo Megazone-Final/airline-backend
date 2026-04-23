@@ -12,6 +12,6 @@ RUN mkdir -p /app/certs \
 
 COPY src ./src
 
-EXPOSE 3002
+EXPOSE 3000
 
 CMD ["node", "src/index.js"]
