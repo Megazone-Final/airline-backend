@@ -6,10 +6,12 @@ const paymentsRoutes = require('./routes/payments');
 const { initMySQL, checkMySQL, closeMySQL } = require('./lib/mysql');
 const { initValkey, checkValkey, closeValkey } = require('./lib/valkey');
 const { createLogger } = require('./lib/logger');
+const { createMetrics } = require('./lib/metrics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const logger = createLogger('payment');
+const metrics = createMetrics('payment');
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -24,6 +26,8 @@ app.use(
 );
 app.use(cookieParser());
 app.use(express.json());
+app.use(metrics.middleware);
+app.get('/metrics', metrics.handler);
 
 app.use('/api/payment', paymentsRoutes);
 
