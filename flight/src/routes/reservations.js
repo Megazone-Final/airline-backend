@@ -175,6 +175,35 @@ internalRouter.post('/reservations', internal, async (req, res) => {
   }
 });
 
+internalRouter.get('/reservations', internal, async (req, res) => {
+  try {
+    const userId = parseUserId(req.query.userId);
+    if (!userId) {
+      logger.warn('Internal reservation list missing user id', {
+        event: 'validation_failed',
+        category: 'user_input',
+        reason: 'missing_user_id',
+        statusCode: 400,
+        context: { method: req.method, path: req.originalUrl },
+      });
+      return res.status(400).json({ message: '사용자 정보가 필요합니다.' });
+    }
+
+    const reservations = await listReservationsByUser(userId);
+    return res.json(reservations);
+  } catch (err) {
+    logger.error('Internal reservation list lookup failed', {
+      event: 'internal_reservation_list_lookup_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl },
+      error: err,
+    });
+    return res.status(500).json({ message: '내부 오류가 발생했습니다.' });
+  }
+});
+
 internalRouter.patch('/reservations/:id/cancel', internal, async (req, res) => {
   try {
     const userId = parseUserId(req.body.userId);

@@ -149,7 +149,7 @@ async function cancelPaymentForReservation(reservationId, userId) {
 }
 
 async function listPaymentsByUser(userId) {
-  const [rows] = await readerPool.execute(
+  const [rows] = await writerPool.execute(
     `
       SELECT
         id,

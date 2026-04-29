@@ -63,7 +63,7 @@ async function findReservationSummaryByIdForUserWithPool(pool, id, userId) {
 }
 
 async function listReservationsByUser(userId) {
-  const [rows] = await readerPool.execute(
+  const [rows] = await writerPool.execute(
     `
       SELECT
         id,

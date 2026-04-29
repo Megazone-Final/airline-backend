@@ -12,6 +12,7 @@ const {
 const {
   getFlightDetail,
   createReservation,
+  listReservations,
   cancelReservation,
 } = require('../services/flights');
 const { createLogger } = require('../lib/logger');
@@ -52,6 +53,7 @@ function validatePayment(body) {
 
 router.post('/', auth, async (req, res) => {
   let pendingPayment = null;
+  let createdReservation = null;
 
   try {
     const validationMessage = validatePayment(req.body);
@@ -92,7 +94,7 @@ router.post('/', auth, async (req, res) => {
       passengerCount: req.body.passengers.length,
     });
 
-    const reservation = await createReservation({
+    createdReservation = await createReservation({
       userId: req.user.id,
       paymentId: pendingPayment.id,
       flightId: Number(req.body.flightId),
@@ -104,11 +106,26 @@ router.post('/', auth, async (req, res) => {
     const payment = await completePayment(
       pendingPayment.id,
       req.user.id,
-      reservation.id
+      createdReservation.id
     );
 
     return res.status(201).json(payment);
   } catch (err) {
+    if (createdReservation?.id) {
+      try {
+        await cancelReservation(createdReservation.id, req.user.id);
+      } catch (reservationCancelErr) {
+        logger.error('Failed to cancel reservation after payment failure', {
+          event: 'reservation_rollback_failed',
+          category: 'data_integrity',
+          reason: 'rollback_failed',
+          statusCode: 500,
+          context: { reservationId: createdReservation.id, userId: req.user?.id },
+          error: reservationCancelErr,
+        });
+      }
+    }
+
     if (pendingPayment?.id) {
       try {
         await failPayment(pendingPayment.id, req.user.id);
@@ -165,29 +182,65 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+router.get('/reservations', auth, async (req, res) => {
+  try {
+    const [reservations, payments] = await Promise.all([
+      listReservations(req.user.id),
+      listPaymentsByUser(req.user.id),
+    ]);
+    const paymentsByReservationId = new Map(
+      payments
+        .filter((payment) => (
+          payment.reservationId && ['completed', 'cancelled'].includes(payment.status)
+        ))
+        .map((payment) => [payment.reservationId, payment])
+    );
+    const matchedReservations = reservations
+      .filter((reservation) => paymentsByReservationId.has(reservation.id))
+      .map((reservation) => ({
+        ...reservation,
+        payment: paymentsByReservationId.get(reservation.id),
+      }));
+    const matchedPayments = matchedReservations.map((reservation) => reservation.payment);
+
+    return res.json({
+      reservations: matchedReservations,
+      payments: matchedPayments,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      logger.warn('Reservation history request rejected', {
+        event: 'reservation_history_rejected',
+        category: 'external_dependency',
+        reason: 'reservation_history_lookup_failed',
+        statusCode: err.statusCode,
+        context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+        error: err,
+      });
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+
+    logger.error('Reservation history lookup failed unexpectedly', {
+      event: 'reservation_history_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+      error: err,
+    });
+    return res.status(500).json({ message: '서버 오류가 발생했습니다' });
+  }
+});
+
 router.patch('/reservations/:reservationId/cancel', auth, async (req, res) => {
   const { reservationId } = req.params;
 
   try {
-    const payment = await findPaymentByReservationIdForUser(reservationId, req.user.id);
-    if (!payment) {
-      logger.warn('Payment record not found for reservation cancellation', {
-        event: 'payment_reservation_not_found',
-        category: 'user_input',
-        reason: 'resource_not_found',
-        statusCode: 404,
-        context: {
-          method: req.method,
-          path: req.originalUrl,
-          reservationId,
-          userId: req.user?.id,
-        },
-      });
-      return res.status(404).json({ message: '결제 내역을 찾을 수 없습니다' });
-    }
-
     const reservation = await cancelReservation(reservationId, req.user.id);
-    const cancelledPayment = await cancelPaymentForReservation(reservationId, req.user.id);
+    const payment = await findPaymentByReservationIdForUser(reservationId, req.user.id);
+    const cancelledPayment = payment
+      ? await cancelPaymentForReservation(reservationId, req.user.id)
+      : null;
 
     return res.json({
       reservation,
