@@ -4,12 +4,15 @@ const {
   createPendingPayment,
   completePayment,
   failPayment,
+  cancelPaymentForReservation,
   listPaymentsByUser,
   findPaymentByIdForUser,
+  findPaymentByReservationIdForUser,
 } = require('../repositories/payments');
 const {
   getFlightDetail,
   createReservation,
+  cancelReservation,
 } = require('../services/flights');
 const { createLogger } = require('../lib/logger');
 
@@ -156,6 +159,59 @@ router.get('/', auth, async (req, res) => {
       reason: 'unhandled_exception',
       statusCode: 500,
       context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+      error: err,
+    });
+    return res.status(500).json({ message: '서버 오류가 발생했습니다' });
+  }
+});
+
+router.patch('/reservations/:reservationId/cancel', auth, async (req, res) => {
+  const { reservationId } = req.params;
+
+  try {
+    const payment = await findPaymentByReservationIdForUser(reservationId, req.user.id);
+    if (!payment) {
+      logger.warn('Payment record not found for reservation cancellation', {
+        event: 'payment_reservation_not_found',
+        category: 'user_input',
+        reason: 'resource_not_found',
+        statusCode: 404,
+        context: {
+          method: req.method,
+          path: req.originalUrl,
+          reservationId,
+          userId: req.user?.id,
+        },
+      });
+      return res.status(404).json({ message: '결제 내역을 찾을 수 없습니다' });
+    }
+
+    const reservation = await cancelReservation(reservationId, req.user.id);
+    const cancelledPayment = await cancelPaymentForReservation(reservationId, req.user.id);
+
+    return res.json({
+      reservation,
+      payment: cancelledPayment,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      logger.warn('Reservation cancellation request rejected', {
+        event: 'reservation_cancel_rejected',
+        category: 'external_dependency',
+        reason: 'reservation_cancel_failed',
+        statusCode: err.statusCode,
+        context: { method: req.method, path: req.originalUrl, reservationId, userId: req.user?.id },
+        error: err,
+      });
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+
+    logger.error('Reservation cancellation failed unexpectedly', {
+      event: 'reservation_cancel_failed',
+      category: 'application',
+      reason: 'unhandled_exception',
+      statusCode: 500,
+      context: { method: req.method, path: req.originalUrl, reservationId, userId: req.user?.id },
       error: err,
     });
     return res.status(500).json({ message: '서버 오류가 발생했습니다' });

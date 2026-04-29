@@ -32,10 +32,34 @@ function mapPassenger(row) {
 }
 
 function createReservationId() {
-  return `SW-R${Date.now().toString(36).toUpperCase()}${crypto
+  return `MZC-R${Date.now().toString(36).toUpperCase()}${crypto
     .randomBytes(2)
     .toString('hex')
     .toUpperCase()}`;
+}
+
+async function findReservationSummaryByIdForUserWithPool(pool, id, userId) {
+  const [rows] = await pool.execute(
+    `
+      SELECT
+        id,
+        flight_no AS flightNo,
+        departure,
+        arrival,
+        travel_date AS date,
+        departure_time AS departureTime,
+        status,
+        passenger_count AS passengerCount,
+        total_price AS totalPrice,
+        created_at AS createdAt
+      FROM reservations
+      WHERE id = ? AND user_id = ?
+      LIMIT 1
+    `,
+    [id, userId]
+  );
+
+  return rows[0] ? mapReservationSummary(rows[0]) : null;
 }
 
 async function listReservationsByUser(userId) {
@@ -254,8 +278,62 @@ async function createReservation({
   }
 }
 
+async function cancelReservationForUser(id, userId) {
+  const connection = await writerPool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.execute(
+      `
+        SELECT
+          id,
+          flight_id AS flightId,
+          status,
+          passenger_count AS passengerCount
+        FROM reservations
+        WHERE id = ? AND user_id = ?
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [id, userId]
+    );
+
+    const reservation = rows[0];
+    if (!reservation) {
+      await connection.rollback();
+      return null;
+    }
+
+    if (reservation.status !== 'cancelled') {
+      await connection.execute(
+        `
+          UPDATE reservations
+          SET status = 'cancelled'
+          WHERE id = ? AND user_id = ?
+        `,
+        [id, userId]
+      );
+
+      await connection.execute(
+        'UPDATE flights SET seats = seats + ? WHERE id = ?',
+        [reservation.passengerCount, reservation.flightId]
+      );
+    }
+
+    await connection.commit();
+    return findReservationSummaryByIdForUserWithPool(writerPool, id, userId);
+  } catch (err) {
+    await connection.rollback();
+    throw err;
+  } finally {
+    connection.release();
+  }
+}
+
 module.exports = {
   listReservationsByUser,
   findReservationByIdForUser,
   createReservation,
+  cancelReservationForUser,
 };

@@ -78,7 +78,22 @@ async function createReservation(payload) {
   });
 }
 
+async function cancelReservation(reservationId, userId) {
+  const headers = {};
+
+  if (process.env.INTERNAL_API_KEY) {
+    headers['x-internal-api-key'] = process.env.INTERNAL_API_KEY;
+  }
+
+  return request(`/internal/reservations/${encodeURIComponent(reservationId)}/cancel`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ userId }),
+  });
+}
+
 module.exports = {
   getFlightDetail,
   createReservation,
+  cancelReservation,
 };

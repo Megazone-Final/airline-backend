@@ -1,7 +1,7 @@
 module.exports = [
   {
-    airline: 'SkyWing Air',
-    flightNo: 'SW101',
+    airline: 'MZC',
+    flightNo: 'MZC101',
     departure: 'ICN',
     departureAirport: '인천국제공항',
     arrival: 'NRT',
@@ -14,8 +14,8 @@ module.exports = [
     aircraft: 'Boeing 737-800',
   },
   {
-    airline: 'SkyWing Air',
-    flightNo: 'SW201',
+    airline: 'MZC',
+    flightNo: 'MZC201',
     departure: 'ICN',
     departureAirport: '인천국제공항',
     arrival: 'NRT',
@@ -28,8 +28,8 @@ module.exports = [
     aircraft: 'Airbus A321neo',
   },
   {
-    airline: 'SkyWing Air',
-    flightNo: 'SW305',
+    airline: 'MZC',
+    flightNo: 'MZC305',
     departure: 'ICN',
     departureAirport: '인천국제공항',
     arrival: 'NRT',
@@ -42,8 +42,8 @@ module.exports = [
     aircraft: 'Boeing 737-900ER',
   },
   {
-    airline: 'SkyWing Air',
-    flightNo: 'SW102',
+    airline: 'MZC',
+    flightNo: 'MZC102',
     departure: 'ICN',
     departureAirport: '인천국제공항',
     arrival: 'KIX',
@@ -56,8 +56,8 @@ module.exports = [
     aircraft: 'Airbus A320',
   },
   {
-    airline: 'SkyWing Air',
-    flightNo: 'SW410',
+    airline: 'MZC',
+    flightNo: 'MZC410',
     departure: 'ICN',
     departureAirport: '인천국제공항',
     arrival: 'BKK',
@@ -70,8 +70,8 @@ module.exports = [
     aircraft: 'Boeing 787-8',
   },
   {
-    airline: 'SkyWing Air',
-    flightNo: 'SW510',
+    airline: 'MZC',
+    flightNo: 'MZC510',
     departure: 'GMP',
     departureAirport: '김포국제공항',
     arrival: 'CJU',

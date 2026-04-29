@@ -135,6 +135,19 @@ async function failPayment(paymentId, userId) {
   return findPaymentByIdForUserWithPool(writerPool, paymentId, userId);
 }
 
+async function cancelPaymentForReservation(reservationId, userId) {
+  await writerPool.execute(
+    `
+      UPDATE payments
+      SET status = 'cancelled'
+      WHERE reservation_id = ? AND user_id = ?
+    `,
+    [reservationId, userId]
+  );
+
+  return findPaymentByReservationIdForUserWithPool(writerPool, reservationId, userId);
+}
+
 async function listPaymentsByUser(userId) {
   const [rows] = await readerPool.execute(
     `
@@ -193,10 +206,57 @@ async function findPaymentByIdForUserWithPool(pool, id, userId) {
   };
 }
 
+async function findPaymentByReservationIdForUserWithPool(pool, reservationId, userId) {
+  const [rows] = await pool.execute(
+    `
+      SELECT
+        id,
+        reservation_id AS reservationId,
+        amount,
+        method,
+        status,
+        created_at AS createdAt,
+        travel_date AS travelDate,
+        passenger_count AS passengerCount,
+        flight_id AS flightId
+      FROM payments
+      WHERE reservation_id = ? AND user_id = ?
+      LIMIT 1
+    `,
+    [reservationId, userId]
+  );
+
+  const payment = rows[0];
+  if (!payment) {
+    return null;
+  }
+
+  return {
+    id: payment.id,
+    reservationId: payment.reservationId,
+    amount: payment.amount,
+    status: payment.status,
+    method: payment.method,
+    createdAt: payment.createdAt,
+    travelDate: formatDate(payment.travelDate),
+    passengerCount: payment.passengerCount,
+    flightId: payment.flightId,
+  };
+}
+
 async function findPaymentByIdForUser(id, userId) {
   let payment = await findPaymentByIdForUserWithPool(readerPool, id, userId);
   if (!payment) {
     payment = await findPaymentByIdForUserWithPool(writerPool, id, userId);
+  }
+
+  return payment;
+}
+
+async function findPaymentByReservationIdForUser(reservationId, userId) {
+  let payment = await findPaymentByReservationIdForUserWithPool(readerPool, reservationId, userId);
+  if (!payment) {
+    payment = await findPaymentByReservationIdForUserWithPool(writerPool, reservationId, userId);
   }
 
   return payment;
@@ -207,6 +267,8 @@ module.exports = {
   createPendingPayment,
   completePayment,
   failPayment,
+  cancelPaymentForReservation,
   listPaymentsByUser,
   findPaymentByIdForUser,
+  findPaymentByReservationIdForUser,
 };
