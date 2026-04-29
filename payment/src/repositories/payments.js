@@ -24,6 +24,9 @@ function mapPayment(row) {
     status: row.status,
     method: row.method,
     createdAt: row.createdAt,
+    travelDate: formatDate(row.travelDate),
+    passengerCount: row.passengerCount,
+    flightId: row.flightId,
   };
 }
 
@@ -157,7 +160,10 @@ async function listPaymentsByUser(userId) {
         amount,
         method,
         status,
-        created_at AS createdAt
+        created_at AS createdAt,
+        travel_date AS travelDate,
+        passenger_count AS passengerCount,
+        flight_id AS flightId
       FROM payments
       WHERE user_id = ?
       ORDER BY created_at DESC

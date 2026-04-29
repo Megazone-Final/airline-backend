@@ -51,6 +51,32 @@ function validatePayment(body) {
   return null;
 }
 
+function reservationStatusFromPayment(status) {
+  if (status === 'cancelled') {
+    return 'cancelled';
+  }
+
+  return 'confirmed';
+}
+
+async function buildReservationFromPayment(payment) {
+  const flight = payment.flightId ? await getFlightDetail(payment.flightId).catch(() => null) : null;
+
+  return {
+    id: payment.reservationId,
+    flightNo: flight?.flightNo || '-',
+    departure: flight?.departure || '-',
+    arrival: flight?.arrival || '-',
+    date: payment.travelDate,
+    departureTime: flight?.departureTime || '-',
+    status: reservationStatusFromPayment(payment.status),
+    passengerCount: payment.passengerCount,
+    totalPrice: payment.amount,
+    createdAt: payment.createdAt,
+    payment,
+  };
+}
+
 router.post('/', auth, async (req, res) => {
   let pendingPayment = null;
   let createdReservation = null;
@@ -184,23 +210,39 @@ router.get('/', auth, async (req, res) => {
 
 router.get('/reservations', auth, async (req, res) => {
   try {
-    const [reservations, payments] = await Promise.all([
-      listReservations(req.user.id),
-      listPaymentsByUser(req.user.id),
-    ]);
-    const paymentsByReservationId = new Map(
-      payments
-        .filter((payment) => (
-          payment.reservationId && ['completed', 'cancelled'].includes(payment.status)
-        ))
-        .map((payment) => [payment.reservationId, payment])
+    const payments = (await listPaymentsByUser(req.user.id))
+      .filter((payment) => (
+        payment.reservationId && ['completed', 'cancelled'].includes(payment.status)
+      ));
+    let reservations = [];
+
+    try {
+      reservations = await listReservations(req.user.id);
+    } catch (reservationLookupErr) {
+      logger.warn('Flight reservation lookup failed, falling back to payment records', {
+        event: 'reservation_history_fallback',
+        category: 'external_dependency',
+        reason: 'flight_reservation_lookup_failed',
+        statusCode: reservationLookupErr.statusCode || 502,
+        context: { method: req.method, path: req.originalUrl, userId: req.user?.id },
+        error: reservationLookupErr,
+      });
+    }
+
+    const reservationsById = new Map(reservations.map((reservation) => [reservation.id, reservation]));
+    const matchedReservations = await Promise.all(
+      payments.map(async (payment) => {
+        const reservation = reservationsById.get(payment.reservationId);
+        if (reservation) {
+          return {
+            ...reservation,
+            payment,
+          };
+        }
+
+        return buildReservationFromPayment(payment);
+      })
     );
-    const matchedReservations = reservations
-      .filter((reservation) => paymentsByReservationId.has(reservation.id))
-      .map((reservation) => ({
-        ...reservation,
-        payment: paymentsByReservationId.get(reservation.id),
-      }));
     const matchedPayments = matchedReservations.map((reservation) => reservation.payment);
 
     return res.json({
