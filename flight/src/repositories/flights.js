@@ -1,5 +1,13 @@
 const { readerPool } = require('../lib/mysql');
 
+function normalizeAirlineName(value) {
+  return value && value !== 'SkyWing Air' ? value : 'MZC';
+}
+
+function normalizeFlightNo(value) {
+  return value ? String(value).replace(/^SW/, 'MZC') : value;
+}
+
 function mapFlight(row) {
   if (!row) {
     return null;
@@ -7,8 +15,8 @@ function mapFlight(row) {
 
   return {
     id: row.id,
-    airline: row.airline,
-    flightNo: row.flightNo,
+    airline: normalizeAirlineName(row.airline),
+    flightNo: normalizeFlightNo(row.flightNo),
     departure: row.departure,
     departureAirport: row.departureAirport,
     arrival: row.arrival,

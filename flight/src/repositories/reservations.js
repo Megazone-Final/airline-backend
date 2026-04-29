@@ -5,10 +5,18 @@ function formatDate(value) {
   return value instanceof Date ? value.toISOString().split('T')[0] : value;
 }
 
+function normalizeAirlineName(value) {
+  return value && value !== 'SkyWing Air' ? value : 'MZC';
+}
+
+function normalizeFlightNo(value) {
+  return value ? String(value).replace(/^SW/, 'MZC') : value;
+}
+
 function mapReservationSummary(row) {
   return {
     id: row.id,
-    flightNo: row.flightNo,
+    flightNo: normalizeFlightNo(row.flightNo),
     departure: row.departure,
     arrival: row.arrival,
     date: formatDate(row.date),
@@ -130,7 +138,7 @@ async function findReservationByIdForUser(id, userId) {
 
   return {
     id: reservation.id,
-    flightNo: reservation.flightNo,
+    flightNo: normalizeFlightNo(reservation.flightNo),
     departure: reservation.departure,
     arrival: reservation.arrival,
     date: formatDate(reservation.date),
@@ -213,8 +221,8 @@ async function createReservation({
         userId,
         paymentId || null,
         flight.id,
-        flight.flightNo,
-        flight.airline,
+        normalizeFlightNo(flight.flightNo),
+        normalizeAirlineName(flight.airline),
         flight.departure,
         flight.arrival,
         flight.departureTime,
@@ -259,7 +267,7 @@ async function createReservation({
 
     return {
       id: reservationId,
-      flightNo: flight.flightNo,
+      flightNo: normalizeFlightNo(flight.flightNo),
       departure: flight.departure,
       arrival: flight.arrival,
       date,
